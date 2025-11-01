@@ -1,0 +1,47 @@
+[
+    {
+      "time": "09:45",
+      "strategy": "8Ball Butterfly",
+      "underlying": "QQQ",
+      "ruleBundle": { "takeProfitPct": 50, "stopLossPct": 100 }
+    },
+    {
+      "time": "10:00",
+      "strategy": "Vertical",
+      "underlying": "SPX",
+      "delta": 50,
+      "width": 10,
+      "ruleBundle": { "takeProfitPct": 50, "stopLossPct": 100, "timeExit": "13:00" }
+    },
+    {
+      "time": "10:30",
+      "strategy": "8Ball Vertical",
+      "underlying": "SPX",
+      "ruleBundle": { "takeProfitPct": 50, "stopLossPct": 100 }
+    },
+    {
+      "time": "12:30",
+      "strategy": "8Ball Butterfly",
+      "underlying": "SPX",
+      "ruleBundle": { "takeProfitPct": 50, "stopLossPct": 100 }
+    },
+    {
+      "time": "13:05",
+      "strategy": "8Ball Butterfly",
+      "underlying": "SPX",
+      "ruleBundle": { "takeProfitPct": 50, "stopLossPct": 100 }
+    },
+    {
+      "time": "13:30",
+      "strategy": "8Ball Vertical",
+      "underlying": "SPX",
+      "ruleBundle": { "takeProfitPct": 50, "stopLossPct": 100 }
+    },
+    {
+      "time": "13:30",
+      "strategy": "8Ball Vertical",
+      "underlying": "QQQ",
+      "ruleBundle": { "takeProfitPct": 50, "stopLossPct": 100 }
+    }
+  ]
+  

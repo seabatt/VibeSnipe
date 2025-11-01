@@ -1,0 +1,80 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@layer base {
+  :root,
+  :root[data-theme="dark"] {
+    /* Dark theme colors */
+    --bg: #0F1115;
+    --surface: #151821;
+    --surface-alt: #1C1F29;
+    --border: #232734;
+    --text-primary: #E6E7EB;
+    --text-secondary: #A9AFC3;
+    
+    /* Semantic colors (same for both themes) */
+    --profit: #82D895;
+    --risk: #EC612B;
+    --info: #4DA1FF;
+    --warning: #F5C04E;
+  }
+
+  :root[data-theme="light"] {
+    /* Light theme colors */
+    --bg: #FFFFFF;
+    --surface: #F5F7FB;
+    --surface-alt: #ECEFF6;
+    --border: #E2E6F0;
+    --text-primary: #0E1220;
+    --text-secondary: #3A445A;
+    
+    /* Semantic colors (same for both themes) */
+    --profit: #82D895;
+    --risk: #EC612B;
+    --info: #4DA1FF;
+    --warning: #F5C04E;
+  }
+
+  body {
+    @apply font-sans antialiased;
+    font-feature-settings: 'tnum' 1; /* Tabular numbers */
+    background-color: var(--bg);
+    color: var(--text-primary);
+    transition: background-color 150ms ease-in-out, color 150ms ease-in-out;
+  }
+
+  * {
+    transition: background-color 150ms ease-in-out, color 150ms ease-in-out, border-color 150ms ease-in-out;
+  }
+
+  /* Focus styles for accessibility */
+  *:focus-visible {
+    outline: 2px solid var(--info);
+    outline-offset: 2px;
+  }
+}
+
+:root {
+  /* Elevation variables */
+  --elevation-sm: 0 1px 2px rgba(0,0,0,0.08);
+  --elevation-md: 0 4px 8px rgba(0,0,0,0.12);
+  --elevation-lg: 0 12px 24px rgba(0,0,0,0.18);
+  
+  /* Spacing variables for tokens */
+  --space-4: 4px;
+  --space-8: 8px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --space-24: 24px;
+  --space-32: 32px;
+}
+
+@layer utilities {
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1;
+  }
+}
