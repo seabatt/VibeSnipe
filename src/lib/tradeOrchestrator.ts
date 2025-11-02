@@ -40,6 +40,7 @@ import { chaseOrder } from './tastytrade/chaseEngine';
 import type { ChaseConfig } from './tastytrade/chaseEngine';
 import type { VerticalLegs } from './tastytrade/types';
 import { logger } from './logger';
+import { canAddTrade } from './risk/portfolioTracker';
 
 /**
  * Orchestration configuration.
@@ -138,6 +139,43 @@ export async function executeTradeLifecycle(
     const error = 'Invalid trade intent';
     logger.error(error, { intent });
     throw new Error(error);
+  }
+
+  // Check portfolio limits before proceeding
+  try {
+    // Build a TradeSpec from the intent for portfolio checking
+    const tradeSpec = {
+      underlying: intent.legs[0]?.expiry.split('_')[0] || 'UNKNOWN', // Extract from expiry format
+      strategy: 'vertical',
+      direction: intent.legs[0]?.right === 'CALL' ? 'CALL' as const : 'PUT' as const,
+      strikes: intent.legs.map(l => l.strike),
+      target_delta: 0.50, // Default, would come from metadata
+      quantity: intent.quantity,
+      price: intent.limitPrice || 0,
+      expiry: intent.legs[0]?.expiry || '',
+      accountId: intent.accountId,
+      ruleBundle: intent.ruleBundle,
+      strategy_version: intent.strategyVersion,
+    };
+
+    const portfolioCheck = canAddTrade(tradeSpec);
+    if (!portfolioCheck.can_add) {
+      const error = `Portfolio limit check failed: ${portfolioCheck.reason}`;
+      logger.warn(error, { 
+        tradeId: intent.id, 
+        current: portfolioCheck.current_exposure,
+        projected: portfolioCheck.projected_exposure,
+      });
+      // Return error without creating trade in state machine
+      return {
+        trade: { id: intent.id, state: TradeState.REJECTED } as Trade,
+        success: false,
+        error,
+      };
+    }
+  } catch (error) {
+    logger.error('Failed to check portfolio limits', { tradeId: intent.id }, error as Error);
+    // Continue anyway but log the error
   }
 
   // Create trade in state machine

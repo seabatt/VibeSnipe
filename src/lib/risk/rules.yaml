@@ -1,0 +1,101 @@
+# Risk Rules Configuration
+# Declarative risk management rules for VibeSnipe
+
+rules:
+  # Delta breach rules
+  - name: max_short_delta
+    enabled: true
+    priority: 1
+    rule_set: "conservative"
+    condition: "short_delta > 50"
+    condition_params:
+      threshold: 50
+    action: "block_trade"
+    reason: "Portfolio short delta exceeds safety limit"
+    
+  - name: max_short_delta_warning
+    enabled: true
+    priority: 5
+    rule_set: "conservative"
+    condition: "short_delta > 30"
+    condition_params:
+      threshold: 30
+    action: "alert"
+    reason: "Portfolio short delta approaching limit"
+
+  # Net credit rules
+  - name: max_net_credit
+    enabled: true
+    priority: 2
+    rule_set: "conservative"
+    condition: "net_credit > 10000"
+    condition_params:
+      threshold: 10000
+    action: "block_trade"
+    reason: "Portfolio net credit exceeds limit"
+
+  # Margin usage rules
+  - name: max_margin_usage
+    enabled: true
+    priority: 3
+    rule_set: "conservative"
+    condition: "margin_usage > 50000"
+    condition_params:
+      threshold: 50000
+    action: "block_trade"
+    reason: "Portfolio margin usage too high"
+
+  # Time-based exit rules
+  - name: market_close_exit
+    enabled: true
+    priority: 10
+    rule_set: "default"
+    condition: "time >= '15:45:00'"
+    condition_params:
+      hour: 15
+      minute: 45
+    action: "close_trade"
+    reason: "Market close protection"
+
+  # Individual trade delta rules
+  - name: trade_delta_too_high
+    enabled: true
+    priority: 4
+    rule_set: "default"
+    condition: "current_delta > 0.65"
+    condition_params:
+      threshold: 0.65
+    action: "alert"
+    reason: "Individual trade delta too high"
+
+  # Day-trade protection
+  - name: multiple_trades_same_underlying
+    enabled: true
+    priority: 6
+    rule_set: "conservative"
+    condition: "position_count > 3"
+    condition_params:
+      max_positions: 3
+    action: "alert"
+    reason: "Too many positions in same underlying"
+
+# Rule sets
+rule_sets:
+  conservative:
+    description: "Conservative risk management for capital preservation"
+    max_short_delta: 50
+    max_net_credit: 10000
+    max_margin_usage: 50000
+    
+  default:
+    description: "Standard risk management"
+    max_short_delta: 100
+    max_net_credit: 20000
+    max_margin_usage: 100000
+    
+  aggressive:
+    description: "Aggressive risk management for maximum exposure"
+    max_short_delta: 200
+    max_net_credit: 50000
+    max_margin_usage: 250000
+
