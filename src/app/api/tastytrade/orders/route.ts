@@ -7,8 +7,9 @@
  */
 
 import { NextResponse } from 'next/server';
-import { submitVertical, fetchAndBuildVertical } from '@/lib/tastytrade';
-import type { VerticalLegs, EntryConfig, VerticalSpec } from '@/lib/tastytrade';
+import { submitVertical } from '@/lib/tastytrade/orders';
+import { fetchAndBuildVertical } from '@/lib/tastytrade/chains';
+import type { VerticalLegs, EntryConfig, VerticalSpec } from '@/lib/tastytrade/types';
 
 /**
  * Request body structure for order submission.

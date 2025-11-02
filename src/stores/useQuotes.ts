@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { subscribeQuotes } from '@/lib/tastytrade';
-import type { GreekQuote } from '@/lib/tastytrade';
+import { subscribeQuotes } from '@/lib/tastytrade/marketData';
+import type { GreekQuote } from '@/lib/tastytrade/types';
 
 type QuoteMsg = { symbol: string; last: number; bid?: number; ask?: number; ts: number };
 

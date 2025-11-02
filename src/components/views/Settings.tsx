@@ -6,6 +6,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useTokens } from '@/hooks/useTokens';
 import { useIsMobile } from '@/components/ui/use-mobile';
 import { useToast } from '@/components/ui';
+import { ScheduledBlock, StrategyKind, Underlying } from '@/types';
+import { useSchedule } from '@/stores/useSchedule';
 
 type TabId = 'account' | 'strategies' | 'discipline' | 'schedule' | 'visuals' | 'advanced';
 
@@ -20,19 +22,6 @@ interface StrategyPreset {
   deltaTarget: number;
   autoArm: boolean;
   autoFire: boolean;
-}
-
-interface Block {
-  id: string;
-  label: string;
-  windowStart: string;
-  windowEnd: string;
-  underlying: string;
-  strategy: string;
-  entryMech: 'manual_preset' | 'copy_paste' | 'auto';
-  rules: { tpPct: number; slPct: number; timeExitEt?: string };
-  limits: { maxTrades: number; perBlockExposureUsd: number };
-  toggles?: { autoArm: boolean; autoFire: boolean };
 }
 
 interface SettingsData {
@@ -56,7 +45,7 @@ interface SettingsData {
   breakevenOverlays: boolean;
   hudTransparency: number;
   presets: StrategyPreset[];
-  blocks: Block[];
+  blocks: ScheduledBlock[];
 }
 
 const INITIAL_SETTINGS: SettingsData = {
@@ -322,10 +311,11 @@ export function Settings() {
   const tokens = useTokens();
   const colors = tokens.colors;
   const toast = useToast();
+  const { blocks: scheduleBlocks, setBlocks: setScheduleBlocks } = useSchedule();
   
   const [activeTab, setActiveTab] = useState<TabId>('account');
   const [settings, setSettings] = useState<SettingsData>(INITIAL_SETTINGS);
-  const [editingBlock, setEditingBlock] = useState<Block | null>(null);
+  const [editingBlock, setEditingBlock] = useState<ScheduledBlock | null>(null);
 
   const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
     { id: 'account', label: 'Account', icon: <DollarSign className="w-4 h-4" /> },
@@ -339,6 +329,8 @@ export function Settings() {
   const handleSave = () => {
     // Save to localStorage
     localStorage.setItem('vibesnipe-settings', JSON.stringify(settings));
+    // Also sync blocks to schedule store
+    setScheduleBlocks(settings.blocks);
     toast('Settings saved successfully', 'profit');
   };
 
@@ -349,6 +341,10 @@ export function Settings() {
 
   const updateSetting = <K extends keyof SettingsData>(key: K, value: SettingsData[K]) => {
     setSettings(prev => ({ ...prev, [key]: value }));
+    // If blocks changed, sync to schedule store
+    if (key === 'blocks') {
+      setScheduleBlocks(value as ScheduledBlock[]);
+    }
   };
 
   const updatePreset = (id: string, updates: Partial<StrategyPreset>) => {
@@ -380,32 +376,37 @@ export function Settings() {
   };
 
   const addBlock = () => {
-    const newBlock: Block = {
+    const newBlock: ScheduledBlock = {
       id: Date.now().toString(),
       label: 'New Block',
       windowStart: '14:00',
       windowEnd: '14:30',
-      underlying: 'SPX',
-      strategy: 'Vertical',
+      underlying: 'SPX' as Underlying,
+      strategy: 'Vertical' as StrategyKind,
       entryMech: 'manual_preset',
       rules: { tpPct: 50, slPct: 100 },
       limits: { maxTrades: 3, perBlockExposureUsd: 1000 },
       toggles: { autoArm: true, autoFire: false }
     };
     setSettings(prev => ({ ...prev, blocks: [...prev.blocks, newBlock] }));
+    setScheduleBlocks([...settings.blocks, newBlock]);
     setEditingBlock(newBlock);
     toast('Block added', 'profit');
   };
 
-  const updateBlock = (id: string, updates: Partial<Block>) => {
+  const updateBlock = (id: string, updates: Partial<ScheduledBlock>) => {
+    const updated = settings.blocks.map(b => b.id === id ? { ...b, ...updates } : b);
     setSettings(prev => ({
       ...prev,
-      blocks: prev.blocks.map(b => b.id === id ? { ...b, ...updates } : b)
+      blocks: updated
     }));
+    setScheduleBlocks(updated);
   };
 
   const deleteBlock = (id: string) => {
-    setSettings(prev => ({ ...prev, blocks: prev.blocks.filter(b => b.id !== id) }));
+    const updated = settings.blocks.filter(b => b.id !== id);
+    setSettings(prev => ({ ...prev, blocks: updated }));
+    setScheduleBlocks(updated);
     setEditingBlock(null);
     toast('Block deleted', 'info');
   };
@@ -446,7 +447,7 @@ export function Settings() {
           gap: `${tokens.space.xs}px`,
           padding: `${tokens.space.xs}px`,
           backgroundColor: colors.surface,
-          borderRadius: `${tokens.radius.lg}px`,
+          borderRadius: `${tokens.radius.xl}px`,
           marginBottom: `${tokens.space.xxxl}px`,
           flexWrap: isMobile ? 'wrap' : 'nowrap',
           overflowX: isMobile ? 'auto' : 'visible',
@@ -492,7 +493,7 @@ export function Settings() {
               <div>
                 <div style={{ 
                   backgroundColor: colors.surface,
-                  borderRadius: `${tokens.radius.lg}px`,
+                  borderRadius: `${tokens.radius.xl}px`,
                   border: `1px solid ${colors.border}`,
                   padding: isMobile ? `${tokens.space.lg}px` : `${tokens.space.xxl}px`,
                   marginBottom: `${tokens.space.xl}px`,
@@ -564,7 +565,7 @@ export function Settings() {
                   gap: `${tokens.space.lg}px`,
                   padding: `${tokens.space.xl}px`,
                   backgroundColor: colors.surface,
-                  borderRadius: `${tokens.radius.lg}px`,
+                  borderRadius: `${tokens.radius.xl}px`,
                   border: `1px solid ${colors.border}`,
                 }}>
                   <div>
@@ -671,7 +672,7 @@ export function Settings() {
                       key={preset.id}
                       style={{
                         backgroundColor: colors.surface,
-                        borderRadius: `${tokens.radius.lg}px`,
+                        borderRadius: `${tokens.radius.xl}px`,
                         border: `1px solid ${colors.border}`,
                         padding: isMobile ? `${tokens.space.lg}px` : `${tokens.space.xl}px`,
                       }}
@@ -791,7 +792,7 @@ export function Settings() {
             {activeTab === 'discipline' && (
               <div style={{ 
                 backgroundColor: colors.surface,
-                borderRadius: `${tokens.radius.lg}px`,
+                borderRadius: `${tokens.radius.xl}px`,
                 border: `1px solid ${colors.border}`,
                 padding: isMobile ? `${tokens.space.lg}px` : `${tokens.space.xxl}px`,
               }}>
@@ -994,7 +995,7 @@ export function Settings() {
                   marginBottom: `${tokens.space.xxl}px`,
                   padding: `${tokens.space.lg}px`,
                   backgroundColor: colors.surface,
-                  borderRadius: `${tokens.radius.lg}px`,
+                  borderRadius: `${tokens.radius.xl}px`,
                   border: `1px solid ${colors.border}`,
                 }}>
                   {settings.blocks.map((block) => (
@@ -1037,7 +1038,7 @@ export function Settings() {
                 {editingBlock && (
                   <div style={{ 
                     backgroundColor: colors.surface,
-                    borderRadius: `${tokens.radius.lg}px`,
+                    borderRadius: `${tokens.radius.xl}px`,
                     border: `1px solid ${colors.border}`,
                     padding: isMobile ? `${tokens.space.lg}px` : `${tokens.space.xxl}px`,
                   }}>
@@ -1183,7 +1184,7 @@ export function Settings() {
             {activeTab === 'visuals' && (
               <div style={{ 
                 backgroundColor: colors.surface,
-                borderRadius: `${tokens.radius.lg}px`,
+                borderRadius: `${tokens.radius.xl}px`,
                 border: `1px solid ${colors.border}`,
                 padding: isMobile ? `${tokens.space.lg}px` : `${tokens.space.xxl}px`,
               }}>
@@ -1276,7 +1277,7 @@ export function Settings() {
             {activeTab === 'advanced' && (
               <div style={{ 
                 backgroundColor: colors.surface,
-                borderRadius: `${tokens.radius.lg}px`,
+                borderRadius: `${tokens.radius.xl}px`,
                 border: `1px solid ${colors.border}`,
                 padding: isMobile ? `${tokens.space.lg}px` : `${tokens.space.xxl}px`,
               }}>

@@ -6,8 +6,8 @@
  */
 
 import { NextResponse } from 'next/server';
-import { cancelOrder } from '@/lib/tastytrade';
-import { getClient } from '@/lib/tastytrade';
+import { cancelOrder } from '@/lib/tastytrade/orders';
+import { getClient } from '@/lib/tastytrade/client';
 
 /**
  * GET handler for order status.
@@ -28,24 +28,29 @@ export async function GET(
     const { searchParams } = new URL(request.url);
     const accountId = searchParams.get('accountId');
 
+    if (!accountId) {
+      return NextResponse.json(
+        { error: 'Missing required query parameter: accountId' },
+        { status: 400 }
+      );
+    }
+
     const client = await getClient();
 
     // Fetch order from SDK
-    // NOTE: Adjust this based on actual @tastytrade/api SDK API
-    // Example:
-    // const order = await client.orders.get(accountId, id);
-    // return NextResponse.json(order);
+    // SDK expects orderId as number
+    const orderIdNum = parseInt(id, 10);
+    if (isNaN(orderIdNum)) {
+      return NextResponse.json(
+        { error: 'Invalid order ID format' },
+        { status: 400 }
+      );
+    }
 
-    console.warn('Order status fetching not yet implemented. Would fetch:', id);
-
-    // Placeholder: Return mock order status
-    // In actual implementation, this would call the SDK to get the order
-    return NextResponse.json({
-      id,
-      status: 'WORKING',
-      accountId: accountId || 'UNKNOWN',
-      // Add other order fields from SDK response
-    });
+    // Get order from SDK
+    const order = await client.orderService.getOrder(accountId, orderIdNum);
+    
+    return NextResponse.json(order);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     

@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Home, Sparkles, History as HistoryIcon, Settings as SettingsIcon, BookOpen, Menu, X } from 'lucide-react';
-import { useThemeContext, ThemeToggle } from '@/components/providers/ThemeProvider';
+import { useThemeContext } from '@/components/providers/ThemeProvider';
 import { useTokens } from '@/hooks/useTokens';
 
 type ViewId = 'home' | 'create-trade' | 'history' | 'settings' | 'library';
@@ -14,12 +14,17 @@ interface NavigationProps {
 
 export function Navigation({ activeView, onViewChange }: NavigationProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const { resolvedTheme } = useThemeContext();
   const tokens = useTokens();
   const colors = tokens.colors;
   
-  // Mobile detection
-  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   const views = [
     { id: 'home' as ViewId, label: 'Home', icon: Home },
@@ -95,16 +100,12 @@ export function Navigation({ activeView, onViewChange }: NavigationProps) {
                   <span>{label}</span>
                 </button>
               ))}
-              <div style={{ marginLeft: `${tokens.space.lg}px` }}>
-                <ThemeToggle />
-              </div>
             </div>
           )}
 
           {/* Mobile Menu Button */}
           {isMobile && (
             <div style={{ display: 'flex', alignItems: 'center', gap: `${tokens.space.md}px` }}>
-              <ThemeToggle />
               <button
                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
                 style={{

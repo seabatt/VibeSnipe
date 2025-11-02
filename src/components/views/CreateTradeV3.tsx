@@ -8,8 +8,12 @@ import { useTokens } from '@/hooks/useTokens';
 import { useThemeContext } from '@/components/providers/ThemeProvider';
 import { useOrders } from '@/stores/useOrders';
 import { useQuotes } from '@/stores/useQuotes';
+import { useSchedule } from '@/stores/useSchedule';
 import { TradeLeg, Underlying, RuleBundle } from '@/types';
 import { PreviewStep } from './PreviewStep';
+import { fetchOptionChain } from '@/lib/tastytrade/chains';
+import type { OptionInstrument } from '@/lib/tastytrade/types';
+import { useToast } from '@/components/ui';
 
 type FlowStep = 'choose' | 'paste' | 'preset' | 'preview' | 'executing' | 'working';
 
@@ -22,6 +26,14 @@ interface ParsedTrade {
   wingStrike?: number;
   limitPrice: number;
   width: number;
+  greeks?: {
+    longDelta?: number;
+    shortDelta?: number;
+    wingDelta?: number;
+    spreadBid?: number;
+    spreadAsk?: number;
+    spreadMid?: number;
+  };
 }
 
 interface Preset {
@@ -122,6 +134,39 @@ function calculateRiskMetrics(trade: ParsedTrade, contracts: number, accountSize
       contracts,
     };
   }
+}
+
+function calculateBracketPrices(
+  trade: ParsedTrade, 
+  tpPct: number, 
+  slPct: number,
+  contracts: number
+) {
+  const credit = trade.limitPrice;
+  const width = trade.width;
+  
+  // PT: X% of credit → buyback at (1 - X%) of credit
+  const ptBuyback = credit * (1 - (tpPct / 100));
+  
+  // SL: credit + (slPct as fraction) × max loss
+  const maxLossPerContract = width - credit;
+  const slFraction = slPct / 100; // 100 → 1.0 = 100% of max loss
+  const slBuyback = credit + (slFraction * maxLossPerContract);
+  
+  // Max loss/gain
+  const maxLoss = maxLossPerContract * 100 * contracts;
+  const maxGain = credit * 100 * contracts;
+  
+  // R:R ratio
+  const riskRewardRatio = maxGain > 0 ? maxLoss / maxGain : 0;
+  
+  return {
+    ptBuyback: parseFloat(ptBuyback.toFixed(2)),
+    slBuyback: parseFloat(slBuyback.toFixed(2)),
+    maxLoss: parseFloat(maxLoss.toFixed(0)),
+    maxGain: parseFloat(maxGain.toFixed(0)),
+    riskRewardRatio: parseFloat(riskRewardRatio.toFixed(1)),
+  };
 }
 
 function generateRiskCurve(trade: ParsedTrade, currentPrice: number, contracts: number) {
@@ -621,17 +666,73 @@ export function CreateTradeV3() {
   const [contracts, setContracts] = useState(1);
   const [tpPct, setTpPct] = useState(50);
   const [slPct, setSlPct] = useState(100);
+  const [adjustmentAttempts, setAdjustmentAttempts] = useState(0);
+  const [originalAlertDelta, setOriginalAlertDelta] = useState<{
+    shortDelta?: number;
+    longDelta?: number;
+  } | null>(null);
+  const MAX_ATTEMPTS = 2;
 
   const handleChoose = (method: 'paste' | 'preset') => {
     setFlowStep(method);
   };
 
-  const handleParseTrade = (trade: ParsedTrade) => {
+  // Fetch Greeks from option chain
+  const fetchAndUpdateGreeks = async (trade: ParsedTrade) => {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const chain = await fetchOptionChain(trade.underlying, today);
+      
+      const longContract = chain.find(c => 
+        c.strike === trade.longStrike && c.right === trade.direction
+      );
+      const shortContract = chain.find(c => 
+        c.strike === trade.shortStrike && c.right === trade.direction
+      );
+      
+      if (longContract && shortContract) {
+        const spreadBid = (shortContract.ask || 0) - (longContract.bid || 0);
+        const spreadAsk = (shortContract.bid || 0) - (longContract.ask || 0);
+        const spreadMid = (spreadBid + spreadAsk) / 2;
+        
+        const greeks = {
+          longDelta: longContract.delta,
+          shortDelta: shortContract.delta,
+          spreadBid,
+          spreadAsk,
+          spreadMid,
+        };
+        
+        setParsedTrade({
+          ...trade,
+          greeks,
+        });
+        
+        // Store original alert delta on first fetch
+        if (!originalAlertDelta && greeks.shortDelta) {
+          setOriginalAlertDelta({
+            shortDelta: greeks.shortDelta,
+            longDelta: greeks.longDelta,
+          });
+        }
+        
+        return greeks;
+      }
+    } catch (err) {
+      console.error('Failed to fetch Greeks:', err);
+    }
+    return null;
+  };
+
+  const handleParseTrade = async (trade: ParsedTrade) => {
     setParsedTrade(trade);
+    setAdjustmentAttempts(0);
+    setOriginalAlertDelta(null);
+    await fetchAndUpdateGreeks(trade);
     setFlowStep('preview');
   };
 
-  const handlePresetSelect = (preset: Preset) => {
+  const handlePresetSelect = async (preset: Preset) => {
     const quote = getQuote(preset.underlying);
     const currentPrice = quote?.last || 5900;
     const targetStrike = Math.round(currentPrice / 5) * 5;
@@ -649,7 +750,88 @@ export function CreateTradeV3() {
     setSelectedPreset(preset);
     setTpPct(preset.tpPct);
     setSlPct(preset.slPct);
+    setAdjustmentAttempts(0);
+    setOriginalAlertDelta(null);
+    await fetchAndUpdateGreeks(mockTrade);
     setFlowStep('preview');
+  };
+
+  const handleStrikeNudge = async (direction: number) => {
+    if (!parsedTrade || adjustmentAttempts >= MAX_ATTEMPTS) return;
+    
+    try {
+      // Fetch current option chain
+      const today = new Date().toISOString().split('T')[0];
+      const chain = await fetchOptionChain(parsedTrade.underlying, today);
+      
+      // Filter by direction
+      const relevantChain = chain.filter(c => c.right === parsedTrade.direction);
+      
+      // Target delta is from original alert
+      const targetShortDelta = originalAlertDelta?.shortDelta || parsedTrade.greeks?.shortDelta;
+      
+      if (!targetShortDelta) {
+        // Fallback to mechanical shift if no delta available
+        const step = ['SPX', 'NDX', 'RUT'].includes(parsedTrade.underlying) ? 5 : 1;
+        const adjustment = direction * step;
+        const newLongStrike = parsedTrade.longStrike + adjustment;
+        const newShortStrike = parsedTrade.shortStrike + adjustment;
+        
+        const updatedTrade = { ...parsedTrade, longStrike: newLongStrike, shortStrike: newShortStrike };
+        setParsedTrade(updatedTrade);
+        await fetchAndUpdateGreeks(updatedTrade);
+        setAdjustmentAttempts(prev => prev + 1);
+        return;
+      }
+      
+      // Find strike closest to target short delta
+      const shortStrikeMatch = relevantChain.reduce((closest, contract) => {
+        const currentDiff = Math.abs((contract.delta || 0) - targetShortDelta);
+        const closestDiff = Math.abs((closest.delta || 0) - targetShortDelta);
+        return currentDiff < closestDiff ? contract : closest;
+      });
+      
+      // Find long strike that maintains original width
+      const targetWidth = parsedTrade.width;
+      const newShortStrike = shortStrikeMatch.strike;
+      const newLongStrike = parsedTrade.direction === 'CALL' 
+        ? newShortStrike - targetWidth  // For calls, long is below short
+        : newShortStrike + targetWidth; // For puts, long is above short
+      
+      // Verify long strike exists in chain
+      const longStrikeMatch = relevantChain.find(c => c.strike === newLongStrike);
+      
+      if (!longStrikeMatch) {
+        console.error('Could not find matching long strike');
+        return;
+      }
+      
+      // Update trade with delta-matched strikes
+      const spreadBid = (shortStrikeMatch.ask || 0) - (longStrikeMatch.bid || 0);
+      const spreadAsk = (shortStrikeMatch.bid || 0) - (longStrikeMatch.ask || 0);
+      const spreadMid = (spreadBid + spreadAsk) / 2;
+      
+      const updatedTrade = {
+        ...parsedTrade,
+        longStrike: newLongStrike,
+        shortStrike: newShortStrike,
+        greeks: {
+          shortDelta: shortStrikeMatch.delta,
+          longDelta: longStrikeMatch.delta,
+          spreadBid,
+          spreadAsk,
+          spreadMid,
+        },
+      };
+      
+      setParsedTrade(updatedTrade);
+      setAdjustmentAttempts(prev => prev + 1);
+      
+      console.log(`Re-anchored: Target Δ ${(targetShortDelta * 100).toFixed(0)}, Found Δ ${((shortStrikeMatch.delta || 0) * 100).toFixed(0)}`);
+      
+    } catch (err) {
+      console.error('Failed to re-anchor with delta matching:', err);
+    }
   };
 
   const handleConfirm = () => {
@@ -689,6 +871,8 @@ export function CreateTradeV3() {
     setFlowStep('choose');
     setParsedTrade(null);
     setSelectedPreset(null);
+    setAdjustmentAttempts(0);
+    setOriginalAlertDelta(null);
   };
 
   const currentPrice = parsedTrade ? (getQuote(parsedTrade.underlying)?.last || 5905) : 5905;
@@ -703,6 +887,9 @@ export function CreateTradeV3() {
   
   const metrics = parsedTrade ? calculateRiskMetrics(parsedTrade, contracts, 25000) : null;
   const riskCurve = parsedTrade ? generateRiskCurve(parsedTrade, currentPrice, contracts) : [];
+  const bracketPrices = parsedTrade && contracts > 0
+    ? calculateBracketPrices(parsedTrade, tpPct, slPct, contracts)
+    : null;
 
   return (
     <div style={{ backgroundColor: colors.bg, color: colors.textPrimary, minHeight: '100vh' }}>
@@ -759,10 +946,14 @@ export function CreateTradeV3() {
               accountValue={25000}
               riskPercentage={2}
               isMobile={isMobile}
+              bracketPrices={bracketPrices}
               onContractsChange={setContracts}
               onTpChange={setTpPct}
               onSlChange={setSlPct}
               onPriceNudge={(dir) => {}}
+              onStrikeNudge={handleStrikeNudge}
+              adjustmentAttempts={adjustmentAttempts}
+              maxAttempts={MAX_ATTEMPTS}
               onConfirm={handleConfirm}
               onCancel={handleCancel}
             />

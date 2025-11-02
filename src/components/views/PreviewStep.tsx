@@ -7,7 +7,7 @@ import { ChevronUp, ChevronDown, Plus, Minus, X, Send } from 'lucide-react';
 import { useTokens } from '@/hooks/useTokens';
 
 interface ParsedTrade {
-  underlying: 'SPX' | 'QQQ';
+  underlying: 'SPX' | 'QQQ' | 'NDX' | 'AAPL' | 'TSLA' | 'SPY' | 'RUT';
   strategy: 'Vertical' | 'Butterfly';
   direction: 'CALL' | 'PUT';
   longStrike: number;
@@ -15,6 +15,14 @@ interface ParsedTrade {
   wingStrike?: number;
   limitPrice: number;
   width: number;
+  greeks?: {
+    longDelta?: number;
+    shortDelta?: number;
+    wingDelta?: number;
+    spreadBid?: number;
+    spreadAsk?: number;
+    spreadMid?: number;
+  };
 }
 
 interface MarketData {
@@ -35,6 +43,14 @@ interface RiskMetrics {
   contracts: number;
 }
 
+interface BracketPrices {
+  ptBuyback: number;
+  slBuyback: number;
+  maxLoss: number;
+  maxGain: number;
+  riskRewardRatio: number;
+}
+
 interface PreviewStepProps {
   trade: ParsedTrade;
   marketData: MarketData;
@@ -47,10 +63,14 @@ interface PreviewStepProps {
   accountValue: number;
   riskPercentage: number;
   isMobile: boolean;
+  bracketPrices: BracketPrices | null;
   onContractsChange: (val: number) => void;
   onTpChange: (val: number) => void;
   onSlChange: (val: number) => void;
   onPriceNudge: (direction: number) => void;
+  onStrikeNudge?: (direction: number) => void;
+  adjustmentAttempts?: number;
+  maxAttempts?: number;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -67,10 +87,14 @@ export function PreviewStep({
   accountValue,
   riskPercentage,
   isMobile,
+  bracketPrices,
   onContractsChange,
   onTpChange,
   onSlChange,
   onPriceNudge,
+  onStrikeNudge,
+  adjustmentAttempts = 0,
+  maxAttempts = 2,
   onConfirm,
   onCancel,
 }: PreviewStepProps) {
@@ -80,6 +104,13 @@ export function PreviewStep({
   
   const riskPerTrade = accountValue * (riskPercentage / 100);
   const spreadCost = trade.limitPrice * 100;
+
+  // Calculate if re-anchor needed
+  const strikeAnchor = trade.shortStrike;
+  const distanceFromAnchor = currentPrice - strikeAnchor;
+  const strikeStep = ['SPX', 'NDX', 'RUT'].includes(trade.underlying) ? 5 : 1;
+  const needsReanchor = Math.abs(distanceFromAnchor) > (strikeStep * 1.5);
+  const suggestedDirection: 'up' | 'down' = distanceFromAnchor < 0 ? 'down' : 'up';
 
   return (
     <motion.div
@@ -97,6 +128,76 @@ export function PreviewStep({
         padding: isMobile ? `${tokens.space.md}px` : `${tokens.space.lg}px`,
       }}
     >
+      {/* Market Context - Show before everything else */}
+      {needsReanchor && onStrikeNudge && (
+        <div style={{
+          padding: isMobile ? `${tokens.space.md}px` : `${tokens.space.lg}px`,
+          backgroundColor: needsReanchor ? colors.semantic.warning + '10' : colors.surface,
+          border: `1px solid ${needsReanchor ? colors.semantic.warning : colors.border}`,
+          borderRadius: `${tokens.radius.md}px`,
+          marginBottom: `${tokens.space.lg}px`,
+        }}>
+          <div style={{
+            fontSize: `${tokens.type.sizes.xs}px`,
+            color: colors.textSecondary,
+            textTransform: 'uppercase',
+            marginBottom: `${tokens.space.sm}px`,
+          }}>
+            Market Context
+          </div>
+          
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: `${tokens.space.md}px`,
+            flexWrap: 'wrap',
+            gap: `${tokens.space.sm}px`,
+          }}>
+            <div>
+              <span style={{ fontSize: `${tokens.type.sizes.lg}px`, color: colors.textPrimary }}>
+                {trade.underlying} Current: {currentPrice.toFixed(2)}
+              </span>
+              {needsReanchor && (
+                <span style={{ 
+                  marginLeft: `${tokens.space.sm}px`,
+                  fontSize: `${tokens.type.sizes.sm}px`,
+                  color: colors.semantic.warning 
+                }}>
+                  ⚠️ Moved {Math.abs(distanceFromAnchor).toFixed(1)}pts
+                </span>
+              )}
+            </div>
+          </div>
+          
+          {needsReanchor && (
+            <>
+              <div style={{ 
+                fontSize: `${tokens.type.sizes.sm}px`, 
+                color: colors.textSecondary,
+                marginBottom: `${tokens.space.sm}px` 
+              }}>
+                Alert was for {strikeAnchor}, now {Math.abs(distanceFromAnchor).toFixed(1)}pts {suggestedDirection === 'down' ? 'ITM' : 'OTM'}
+              </div>
+              <button
+                onClick={() => onStrikeNudge(suggestedDirection === 'down' ? -1 : 1)}
+                style={{
+                  padding: `${tokens.space.sm}px ${tokens.space.md}px`,
+                  backgroundColor: colors.semantic.info,
+                  border: 'none',
+                  borderRadius: `${tokens.radius.sm}px`,
+                  color: '#fff',
+                  cursor: 'pointer',
+                  fontSize: `${tokens.type.sizes.sm}px`,
+                }}
+              >
+                Re-anchor strikes {suggestedDirection} {strikeStep}pts (keep {trade.width}pt width) →
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Hero: Risk Graph */}
       <div style={{
         padding: isMobile ? `${tokens.space.md}px` : `${tokens.space.lg}px`,
@@ -231,14 +332,28 @@ export function PreviewStep({
           border: `1px solid ${colors.border}`,
           borderRadius: `${tokens.radius.md}px`,
         }}>
-          <div style={{
-            fontSize: `${tokens.type.sizes.xs}px`,
-            color: colors.textSecondary,
-            marginBottom: `${tokens.space.md}px`,
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: `${tokens.space.md}px` 
           }}>
-            Strikes
+            <div style={{
+              fontSize: `${tokens.type.sizes.xs}px`,
+              color: colors.textSecondary,
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
+            }}>
+              Strikes
+            </div>
+            {adjustmentAttempts > 0 && (
+              <div style={{
+                fontSize: `${tokens.type.sizes.xs}px`,
+                color: adjustmentAttempts >= maxAttempts ? colors.semantic.risk : colors.textSecondary,
+              }}>
+                Attempt {adjustmentAttempts} of {maxAttempts}
+              </div>
+            )}
           </div>
           
           <div style={{
@@ -248,7 +363,40 @@ export function PreviewStep({
             marginBottom: `${tokens.space.xs}px`,
             letterSpacing: '-0.02em',
           }}>
-            {trade.longStrike.toFixed(2)}/{trade.shortStrike.toFixed(2)}{trade.wingStrike && `/${trade.wingStrike.toFixed(2)}`}
+            {trade.longStrike.toFixed(2)}
+            {trade.greeks?.longDelta && (
+              <span style={{ 
+                fontSize: `${tokens.type.sizes.sm}px`, 
+                color: colors.textSecondary,
+                marginLeft: '6px',
+                fontWeight: 400 
+              }}>
+                ({(trade.greeks.longDelta * 100).toFixed(0)}Δ)
+              </span>
+            )}
+            <span style={{ margin: '0 8px', color: colors.border }}>/</span>
+            {trade.shortStrike.toFixed(2)}
+            {trade.greeks?.shortDelta && (
+              <span style={{ 
+                fontSize: `${tokens.type.sizes.sm}px`, 
+                color: colors.textSecondary,
+                marginLeft: '6px',
+                fontWeight: 400 
+              }}>
+                ({(trade.greeks.shortDelta * 100).toFixed(0)}Δ)
+              </span>
+            )}
+            {trade.wingStrike && `/${trade.wingStrike.toFixed(2)}`}
+            {trade.wingStrike && trade.greeks?.wingDelta && (
+              <span style={{ 
+                fontSize: `${tokens.type.sizes.sm}px`, 
+                color: colors.textSecondary,
+                marginLeft: '6px',
+                fontWeight: 400 
+              }}>
+                ({(trade.greeks.wingDelta * 100).toFixed(0)}Δ)
+              </span>
+            )}
           </div>
           <div style={{
             fontSize: `${tokens.type.sizes.sm}px`,
@@ -256,6 +404,11 @@ export function PreviewStep({
             marginBottom: `${tokens.space.lg}px`,
           }}>
             {trade.width}pt {trade.direction} spread
+            {trade.greeks?.shortDelta && (
+              <span style={{ marginLeft: '8px' }}>
+                · Short leg: {(trade.greeks.shortDelta * 100).toFixed(0)}Δ
+              </span>
+            )}
           </div>
 
           <div style={{
@@ -723,6 +876,170 @@ export function PreviewStep({
             </button>
           </div>
         </div>
+
+        {/* Bracket Order Preview */}
+        {bracketPrices && (
+          <div style={{
+            marginTop: `${tokens.space.lg}px`,
+            paddingTop: `${tokens.space.lg}px`,
+            borderTop: `1px solid ${colors.border}`,
+          }}>
+            <div style={{
+              fontSize: `${tokens.type.sizes.xs}px`,
+              color: colors.textSecondary,
+              marginBottom: `${tokens.space.md}px`,
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
+            }}>
+              Auto-Bracket Summary
+            </div>
+
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, 1fr)',
+              gap: `${tokens.space.md}px`,
+              marginBottom: `${tokens.space.md}px`,
+            }}>
+              {/* PT Buyback */}
+              <div style={{
+                padding: `${tokens.space.sm}px ${tokens.space.md}px`,
+                backgroundColor: colors.semantic.profit + '10',
+                border: `1px solid ${colors.semantic.profit}40`,
+                borderRadius: `${tokens.radius.sm}px`,
+              }}>
+                <div style={{
+                  fontSize: `${tokens.type.sizes.xs}px`,
+                  color: colors.textSecondary,
+                  marginBottom: `${tokens.space.xs}px`,
+                }}>
+                  PT Buyback @ {tpPct}%
+                </div>
+                <div style={{
+                  fontSize: `${tokens.type.sizes.xl}px`,
+                  color: colors.semantic.profit,
+                  fontVariantNumeric: 'tabular-nums',
+                }}>
+                  ${bracketPrices.ptBuyback.toFixed(2)}
+                </div>
+              </div>
+
+              {/* SL Buyback */}
+              <div style={{
+                padding: `${tokens.space.sm}px ${tokens.space.md}px`,
+                backgroundColor: colors.semantic.risk + '10',
+                border: `1px solid ${colors.semantic.risk}40`,
+                borderRadius: `${tokens.radius.sm}px`,
+              }}>
+                <div style={{
+                  fontSize: `${tokens.type.sizes.xs}px`,
+                  color: colors.textSecondary,
+                  marginBottom: `${tokens.space.xs}px`,
+                }}>
+                  SL Buyback @ {slPct}%
+                </div>
+                <div style={{
+                  fontSize: `${tokens.type.sizes.xl}px`,
+                  color: colors.semantic.risk,
+                  fontVariantNumeric: 'tabular-nums',
+                }}>
+                  ${bracketPrices.slBuyback.toFixed(2)}
+                </div>
+              </div>
+            </div>
+
+            {/* Time Exit & R:R */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: `${tokens.space.sm}px ${tokens.space.md}px`,
+              backgroundColor: colors.bg,
+              border: `1px solid ${colors.border}`,
+              borderRadius: `${tokens.radius.sm}px`,
+            }}>
+              <div>
+                <div style={{
+                  fontSize: `${tokens.type.sizes.xs}px`,
+                  color: colors.textSecondary,
+                  marginBottom: '2px',
+                }}>
+                  Time Exit
+                </div>
+                <div style={{
+                  fontSize: `${tokens.type.sizes.sm}px`,
+                  color: colors.textPrimary,
+                }}>
+                  12:00 PM ET (0DTE)
+                </div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{
+                  fontSize: `${tokens.type.sizes.xs}px`,
+                  color: colors.textSecondary,
+                  marginBottom: '2px',
+                }}>
+                  R:R Ratio
+                </div>
+                <div style={{
+                  fontSize: `${tokens.type.sizes.sm}px`,
+                  color: colors.textPrimary,
+                  fontVariantNumeric: 'tabular-nums',
+                }}>
+                  {bracketPrices.riskRewardRatio.toFixed(1)}:1
+                </div>
+              </div>
+            </div>
+
+            {/* Max Loss / Max Gain Summary */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(2, 1fr)',
+              gap: `${tokens.space.sm}px`,
+              marginTop: `${tokens.space.md}px`,
+            }}>
+              <div style={{
+                padding: `${tokens.space.xs}px ${tokens.space.sm}px`,
+                backgroundColor: colors.bg,
+                borderRadius: `${tokens.radius.xs}px`,
+                textAlign: 'center',
+              }}>
+                <div style={{
+                  fontSize: `${tokens.type.sizes.xs}px`,
+                  color: colors.textSecondary,
+                }}>
+                  Max Gain
+                </div>
+                <div style={{
+                  fontSize: `${tokens.type.sizes.base}px`,
+                  color: colors.semantic.profit,
+                  fontVariantNumeric: 'tabular-nums',
+                }}>
+                  ${bracketPrices.maxGain.toFixed(0)}
+                </div>
+              </div>
+              <div style={{
+                padding: `${tokens.space.xs}px ${tokens.space.sm}px`,
+                backgroundColor: colors.bg,
+                borderRadius: `${tokens.radius.xs}px`,
+                textAlign: 'center',
+              }}>
+                <div style={{
+                  fontSize: `${tokens.type.sizes.xs}px`,
+                  color: colors.textSecondary,
+                }}>
+                  Max Loss
+                </div>
+                <div style={{
+                  fontSize: `${tokens.type.sizes.base}px`,
+                  color: colors.semantic.risk,
+                  fontVariantNumeric: 'tabular-nums',
+                }}>
+                  ${bracketPrices.maxLoss.toFixed(0)}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Action Buttons */}

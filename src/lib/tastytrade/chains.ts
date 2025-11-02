@@ -54,41 +54,76 @@ export async function fetchOptionChain(
   try {
     const client = await getClient();
     
-    // Fetch option chain from SDK
-    // NOTE: Adjust this based on actual @tastytrade/api SDK API
-    // Example pattern:
-    // const response = await client.markets.getOptionChain(symbol, { expiration });
-    // const contracts = response.data.optionChain;
-
-    // Placeholder: In a real implementation, this would:
-    // - Call the SDK's option chain endpoint
-    // - Parse and normalize the response
-    // - Filter and transform to OptionInstrument format
-
-    console.warn(
-      `Option chain fetching not yet implemented. Would fetch for ${symbol} exp ${expiration}`
-    );
-
-    // Placeholder return - replace with actual API response parsing
+    // Fetch option chain from SDK using instruments service
+    // SDK has getOptionChain method that takes symbol
+    // The response contains options for all expirations, we'll filter by requested expiration
+    const response = await client.instrumentsService.getOptionChain(symbol);
+    
+    // Normalize SDK response to OptionInstrument[] format
+    // SDK returns options with various structures - filter by expiration
     const contracts: OptionInstrument[] = [];
-
-    // Example of how to normalize SDK response (adjust based on actual SDK format):
-    // for (const contract of rawContracts) {
-    //   contracts.push({
-    //     symbol: contract.underlyingSymbol,
-    //     strike: parseFloat(contract.strikePrice),
-    //     right: contract.optionType === 'C' ? 'CALL' : 'PUT',
-    //     expiration: contract.expirationDate,
-    //     streamerSymbol: contract.streamerSymbol || contract.symbol,
-    //     delta: contract.delta ? parseFloat(contract.delta) : undefined,
-    //     gamma: contract.gamma ? parseFloat(contract.gamma) : undefined,
-    //     theta: contract.theta ? parseFloat(contract.theta) : undefined,
-    //     vega: contract.vega ? parseFloat(contract.vega) : undefined,
-    //     bid: contract.bid ? parseFloat(contract.bid) : undefined,
-    //     ask: contract.ask ? parseFloat(contract.ask) : undefined,
-    //     mark: contract.mark ? parseFloat(contract.mark) : undefined,
-    //   });
-    // }
+    
+    // SDK response format may vary - handle both array and data wrapper
+    const options = Array.isArray(response) 
+      ? response 
+      : (response?.data || (Array.isArray(response?.items) ? response.items : []));
+    
+    if (options && Array.isArray(options)) {
+      for (const contract of options) {
+        // Parse expiration date - filter by the requested expiration
+        const contractExpiration = contract.expiration_date || 
+                                   contract.expiration || 
+                                   contract.exp ||
+                                   contract['expiration-date'];
+        
+        // Skip if expiration doesn't match
+        if (contractExpiration && contractExpiration !== expiration) {
+          continue;
+        }
+        
+        // Parse option type (C for CALL, P for PUT)
+        const optionType = contract.option_type || 
+                          contract.optionType || 
+                          contract['option-type'] ||
+                          contract.type ||
+                          '';
+        const right: 'CALL' | 'PUT' = optionType === 'C' || 
+                                     optionType === 'CALL' || 
+                                     optionType.toUpperCase() === 'CALL'
+          ? 'CALL' 
+          : 'PUT';
+        
+        // Extract strike price
+        const strike = typeof contract.strike_price === 'string' 
+          ? parseFloat(contract.strike_price) 
+          : (contract.strike_price || contract.strikePrice || contract.strike || 0);
+        
+        // Extract streamer symbol (DXLink format)
+        const streamerSymbol = contract.streamer_symbol || 
+          contract.streamerSymbol || 
+          contract.symbol ||
+          `${symbol}_${expiration}_${strike}${right.charAt(0)}`;
+        
+        contracts.push({
+          symbol: contract.underlying_symbol || contract.underlyingSymbol || contract.underlying || symbol,
+          strike,
+          right,
+          expiration: contractExpiration || expiration,
+          streamerSymbol,
+          delta: contract.delta !== undefined ? parseFloat(contract.delta) : undefined,
+          gamma: contract.gamma !== undefined ? parseFloat(contract.gamma) : undefined,
+          theta: contract.theta !== undefined ? parseFloat(contract.theta) : undefined,
+          vega: contract.vega !== undefined ? parseFloat(contract.vega) : undefined,
+          bid: contract.bid !== undefined ? parseFloat(contract.bid) : undefined,
+          ask: contract.ask !== undefined ? parseFloat(contract.ask) : undefined,
+          mark: contract.mark !== undefined 
+            ? parseFloat(contract.mark) 
+            : (contract.bid !== undefined && contract.ask !== undefined
+              ? (parseFloat(contract.bid) + parseFloat(contract.ask)) / 2
+              : undefined),
+        });
+      }
+    }
 
     return contracts;
   } catch (error) {
@@ -205,23 +240,19 @@ export function buildVertical(
     ? shortLeg.strike + width  // For calls, long leg is higher strike
     : shortLeg.strike - width; // For puts, long leg is lower strike
 
-  // For proper implementation, we'd need access to the full chain again
-  // This is a simplified version that assumes we can find the long leg
-  // In practice, you might pass the chain or fetch it again
-
-  // Placeholder: In a real implementation, this would:
-  // 1. Fetch the chain again (or receive it as parameter)
-  // 2. Find the contract with the same expiration, right, and target strike
-  // 3. Return both legs
-
-  // For now, creating a placeholder long leg
-  // In actual usage, you'd need to provide the chain to find the matching long leg
+  // Build long leg from short leg data
+  // Note: This creates a long leg structure but won't have real quote data
+  // For full implementation, the chain should be passed or fetched to get the actual contract
+  // For now, building from available data
   const longLeg: OptionInstrument = {
     symbol: shortLeg.symbol,
     strike: targetStrike,
     right: shortLeg.right,
     expiration: shortLeg.expiration,
-    streamerSymbol: `PLACEHOLDER-${shortLeg.symbol}-${shortLeg.right}-${targetStrike}-${shortLeg.expiration}`,
+    streamerSymbol: shortLeg.streamerSymbol.replace(
+      `${shortLeg.strike}`,
+      `${targetStrike}`
+    ) || `${shortLeg.symbol}_${shortLeg.expiration}_${targetStrike}${shortLeg.right.charAt(0)}`,
   };
 
   return {

@@ -21,10 +21,12 @@ export function DayHUD() {
 
       if (block) {
         const now = new Date();
-        const [hour, min] = block.time.split(':').map(Number);
+        const [startHour, startMin] = block.windowStart.split(':').map(Number);
+        const [endHour, endMin] = block.windowEnd.split(':').map(Number);
         const blockStart = new Date();
-        blockStart.setHours(hour, min, 0, 0);
-        const blockEnd = new Date(blockStart.getTime() + 10 * 60 * 1000);
+        blockStart.setHours(startHour, startMin, 0, 0);
+        const blockEnd = new Date();
+        blockEnd.setHours(endHour, endMin, 0, 0);
         
         if (now >= blockStart && now < blockEnd) {
           const remaining = blockEnd.getTime() - now.getTime();
@@ -94,7 +96,7 @@ export function DayHUD() {
               Current Block
             </div>
             <div className="text-sm font-medium text-text-primary-dark dark:text-text-primary-dark">
-              {currentBlock.time} — {currentBlock.strategy}
+              {currentBlock.label} — {currentBlock.strategy}
             </div>
             <div className="text-xs text-text-secondary-dark dark:text-text-secondary-dark mt-4">
               {currentBlock.underlying}
@@ -119,17 +121,17 @@ export function DayHUD() {
               Rules
             </div>
             <div className="flex flex-wrap gap-4">
-              {currentBlock.ruleBundle && (
+              {currentBlock.rules && (
                 <>
                   <span className="px-8 py-4 bg-info/20 text-info text-xs rounded-12">
-                    TP: {currentBlock.ruleBundle.takeProfitPct}%
+                    TP: {currentBlock.rules.tpPct}%
                   </span>
                   <span className="px-8 py-4 bg-risk/20 text-risk text-xs rounded-12">
-                    SL: {currentBlock.ruleBundle.stopLossPct}%
+                    SL: {currentBlock.rules.slPct}%
                   </span>
-                  {currentBlock.ruleBundle.timeExit && (
+                  {currentBlock.rules.timeExitEt && (
                     <span className="px-8 py-4 bg-warning/20 text-warning text-xs rounded-12">
-                      Time: {currentBlock.ruleBundle.timeExit}
+                      Time: {currentBlock.rules.timeExitEt}
                     </span>
                   )}
                 </>

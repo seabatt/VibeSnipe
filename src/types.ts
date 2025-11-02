@@ -20,17 +20,27 @@ export type StrategyKind =
   | 'Vertical'
   | 'Butterfly'
   | '8Ball Vertical'
-  | '8Ball Butterfly';
+  | '8Ball Butterfly'
+  | 'Iron Condor'
+  | '8Ball Sonar';
 
-export type Underlying = 'SPX' | 'QQQ';
+export type StrategySource = 'user' | '8ball' | 'imported';
+
+export type ExitStrategy = 'profit_target' | 'time_exit' | 'both' | 'expiration';
+
+export type Underlying = 'SPX' | 'QQQ' | 'NDX' | 'AAPL' | 'TSLA' | 'SPY' | 'RUT';
 
 export interface ScheduledBlock {
-  time: string; // "10:00"
-  strategy: StrategyKind;
+  id: string;
+  label: string;
+  windowStart: string; // "09:30"
+  windowEnd: string; // "10:00"
   underlying: Underlying;
-  delta?: number;
-  width?: number;
-  ruleBundle?: RuleBundle;
+  strategy: StrategyKind;
+  entryMech: 'manual_preset' | 'copy_paste' | 'auto';
+  rules: { tpPct: number; slPct: number; timeExitEt?: string };
+  limits: { maxTrades: number; perBlockExposureUsd: number };
+  toggles?: { autoArm: boolean; autoFire: boolean };
 }
 
 export type OrderState =
@@ -39,6 +49,7 @@ export type OrderState =
   | 'FILLED'
   | 'CLOSED'
   | 'CANCELLED'
+  | 'REJECTED'
   | 'ERROR';
 
 export interface Position {
@@ -52,4 +63,22 @@ export interface Position {
   ruleBundle: RuleBundle;
   state: OrderState;
   openedAt: string; // ISO date
+}
+
+export interface PresetTemplate {
+  id: string;
+  name: string;
+  description: string;
+  source: StrategySource;
+  underlying: Underlying;
+  strategy: StrategyKind;
+  direction: LegRight;
+  targetDelta: number;
+  width: number;
+  ruleBundle: RuleBundle;
+  exitStrategy: ExitStrategy;
+  entryWindow?: string; // "09:00" CT
+  autoArm?: boolean;
+  tags?: string[];
+  createdAt: string;
 }

@@ -39,30 +39,19 @@ export function DiscordPaste() {
     try {
       const incompleteTokens: string[] = [];
       const legs: TradeLeg[] = [];
-      let ruleBundle: RuleBundle = { takeProfitPct: 50, stopLossPct: 100 };
+      // Don't auto-apply TP/SL from alerts - user controls this in Preview step
+      const ruleBundle: RuleBundle = { takeProfitPct: 50, stopLossPct: 100 };
 
-      // Parse TP/SL from text
-      const tpMatch = input.match(/TP[:\s]+(\d+)%/i);
-      const slMatch = input.match(/SL[:\s]+(\d+)%/i);
-      const timeMatch = input.match(/Time[:\s]+(\d{1,2}):(\d{2})/i);
-      
-      if (tpMatch) ruleBundle.takeProfitPct = parseInt(tpMatch[1]);
-      if (slMatch) ruleBundle.stopLossPct = parseInt(slMatch[1]);
-      if (timeMatch) {
-        const hour = parseInt(timeMatch[1]);
-        const min = parseInt(timeMatch[2]);
-        ruleBundle.timeExit = `${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
-      }
-
-      // Extract underlying
-      const underlyingMatch = input.match(/\b(SPX|QQQ|SPY|RUT)\b/i);
+      // Extract underlying (including NDX, AAPL, TSLA for 8Ball)
+      const underlyingMatch = input.match(/\b(SPX|QQQ|SPY|RUT|NDX|AAPL|TSLA)\b/i);
       const underlying = underlyingMatch?.[1]?.toUpperCase() || null;
       if (!underlyingMatch) incompleteTokens.push('underlying');
 
       // Extract strategy
       const isVertical = /vertical/i.test(input);
       const isButterfly = /butterfly|fly/i.test(input);
-      if (!isVertical && !isButterfly) incompleteTokens.push('strategy');
+      const isSonar = /sonar|iron.condor/i.test(input);
+      if (!isVertical && !isButterfly && !isSonar) incompleteTokens.push('strategy');
 
       // Extract direction
       const directionMatch = input.match(/\b(CALL|PUT)S?\b/i);
@@ -102,9 +91,19 @@ export function DiscordPaste() {
           );
         }
 
+        // Determine strategy type
+        let strategy: string;
+        if (isSonar) {
+          strategy = 'Iron Condor';
+        } else if (isButterfly) {
+          strategy = 'Butterfly';
+        } else {
+          strategy = 'Vertical';
+        }
+
         setParsed({
           underlying,
-          strategy: isButterfly ? 'Butterfly' : 'Vertical',
+          strategy,
           direction,
           longStrike,
           shortStrike,

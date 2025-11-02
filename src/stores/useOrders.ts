@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { TradeLeg, RuleBundle, OrderState, Position, Underlying, StrategyKind } from '@/types';
-import type { AppOrder, OrderLeg } from '@/lib/tastytrade';
+import type { AppOrder, OrderLeg } from '@/lib/tastytrade/types';
 
 export interface PendingOrder {
   legs: TradeLeg[];
@@ -115,22 +115,22 @@ export const useOrders = create<OrdersStore>((set, get) => {
   let currentAccountId: string | null = null;
 
   return {
-    pendingOrder: null,
-    positions: [],
+  pendingOrder: null,
+  positions: [],
     workingOrders: [],
-    setPendingOrder: (order) => set({ pendingOrder: order }),
-    addPosition: (position) =>
-      set((state) => ({ positions: [...state.positions, position] })),
-    updatePosition: (id, updates) =>
-      set((state) => ({
-        positions: state.positions.map((p) =>
-          p.id === id ? { ...p, ...updates } : p
-        ),
-      })),
-    removePosition: (id) =>
-      set((state) => ({
-        positions: state.positions.filter((p) => p.id !== id),
-      })),
+  setPendingOrder: (order) => set({ pendingOrder: order }),
+  addPosition: (position) =>
+    set((state) => ({ positions: [...state.positions, position] })),
+  updatePosition: (id, updates) =>
+    set((state) => ({
+      positions: state.positions.map((p) =>
+        p.id === id ? { ...p, ...updates } : p
+      ),
+    })),
+  removePosition: (id) =>
+    set((state) => ({
+      positions: state.positions.filter((p) => p.id !== id),
+    })),
     subscribeToOrders: (accountId: string) => {
       // Cleanup existing subscription
       get().unsubscribeFromOrders();

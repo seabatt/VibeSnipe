@@ -7,7 +7,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { getClient, getEnv } from '@/lib/tastytrade';
+import { getClient, getEnv, getAccount } from '@/lib/tastytrade/client';
 
 /**
  * GET handler for authentication status.
@@ -30,16 +30,12 @@ export async function GET(request: Request) {
     // Initialize client (this will validate credentials)
     const client = await getClient();
 
-    // Get account information from SDK
-    // NOTE: Adjust this based on actual @tastytrade/api SDK API
-    // Example:
-    // const accounts = await client.accounts.list();
-    // const accountInfo = accounts.data[0]; // Or get by ID
-
-    // Placeholder account info - replace with actual SDK call
+    // Get account information using getAccount() utility
+    const account = await getAccount();
+    
     const accountInfo = {
-      accountNumber: 'DEMO-ACCOUNT',
-      accountType: 'MARGIN',
+      accountNumber: account.accountNumber,
+      accountType: account.accountType || 'MARGIN',
       // Do not include sensitive fields like tokens, secrets, etc.
     };
 

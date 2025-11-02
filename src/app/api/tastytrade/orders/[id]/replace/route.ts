@@ -7,7 +7,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { cancelOrder, replaceOrder } from '@/lib/tastytrade';
+import { cancelOrder, replaceOrder } from '@/lib/tastytrade/orders';
 
 /**
  * Request body structure for order replacement.

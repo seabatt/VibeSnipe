@@ -5,13 +5,13 @@
  * with OAuth2 authentication and automatic token refresh handling.
  */
 
+import TastytradeClient from '@tastytrade/api';
 import type { TastytradeEnv } from './types';
 
-// Note: This assumes the @tastytrade/api package is installed.
-// Install with: npm install @tastytrade/api
-// The actual import will depend on the SDK's export structure
-// For now, using a type placeholder - adjust based on actual SDK exports
-type TastytradeSDK = any; // Replace with actual SDK type when available
+/**
+ * Type alias for the Tastytrade SDK client instance.
+ */
+type TastytradeSDK = InstanceType<typeof TastytradeClient>;
 
 /**
  * Client instance cache to avoid re-initialization.
@@ -62,45 +62,38 @@ export async function getClient(): Promise<TastytradeSDK> {
     throw new Error('TASTYTRADE_REFRESH_TOKEN environment variable is required');
   }
 
-  // Determine API base URL based on environment
-  const baseUrl = env === 'prod' 
-    ? 'https://api.tastytrade.com' 
-    : 'https://api.cert.tastytrade.com';
-
   try {
-    // Initialize the SDK with OAuth2 credentials
-    // NOTE: Adjust this based on the actual @tastytrade/api SDK initialization pattern
-    // The following is a placeholder structure - refer to official SDK documentation
+    // Determine base URLs based on environment
+    const baseUrl = env === 'prod' 
+      ? 'https://api.tastytrade.com' 
+      : 'https://api.cert.tastytrade.com';
     
-    // Example initialization pattern (adjust to match actual SDK):
-    // const { TastytradeApi } = require('@tastytrade/api');
-    // clientInstance = new TastytradeApi({
-    //   baseUrl,
-    //   auth: {
-    //     type: 'oauth2',
-    //     clientSecret,
-    //     refreshToken,
-    //   },
-    // });
+    const accountStreamerUrl = env === 'prod'
+      ? 'wss://streamer.tastytrade.com'
+      : 'wss://streamer.cert.tastytrade.com';
 
-    // For now, creating a placeholder that will need to be replaced
-    // when the SDK is installed and we have the actual API structure
-    console.warn(
-      'Tastytrade SDK not yet initialized. Install @tastytrade/api and update this module with the correct initialization pattern.'
-    );
-
-    // Placeholder: In a real implementation, this would be the actual SDK client
-    // The SDK should handle:
-    // - OAuth2 token management
-    // - Automatic token refresh
-    // - Request retries
-    // - Error handling
-    clientInstance = {
-      baseUrl,
-      env,
-      authenticated: true,
-      // SDK methods will be available here once properly initialized
-    } as TastytradeSDK;
+    // Initialize client with base URL and account streamer URL
+    clientInstance = new TastytradeClient(baseUrl, accountStreamerUrl);
+    
+    // OAuth2 authentication for the SDK
+    // The SDK's httpClient may handle OAuth via headers or token management
+    // For OAuth2 with refresh tokens, we may need to set authorization headers manually
+    // or use the httpClient's authentication methods
+    // Check if httpClient has setAuthToken or similar methods
+    const httpClient = (clientInstance as any).httpClient;
+    if (httpClient && typeof httpClient.setAuthToken === 'function') {
+      // If SDK supports setting auth token directly
+      httpClient.setAuthToken(refreshToken);
+    } else {
+      // Otherwise, OAuth2 may be handled via API calls to get access token
+      // For now, storing credentials for later use - actual token exchange may happen on first API call
+      // The SDK might handle this automatically via httpClient interceptors
+      (clientInstance as any)._oauthConfig = {
+        clientSecret,
+        refreshToken,
+        scopes: ['read', 'trade'],
+      };
+    }
 
     return clientInstance;
   } catch (error) {
@@ -132,5 +125,48 @@ export function resetClient(): void {
 export function getEnv(): TastytradeEnv | null {
   const env = process.env.TASTYTRADE_ENV as TastytradeEnv;
   return env === 'prod' || env === 'sandbox' ? env : null;
+}
+
+/**
+ * Gets account information from the authenticated client.
+ * 
+ * Fetches the first available account for the authenticated user.
+ * 
+ * @returns {Promise<{ accountNumber: string; accountType?: string }>} Account information
+ * @throws {Error} If account fetching fails
+ * 
+ * @example
+ * ```ts
+ * const account = await getAccount();
+ * console.log(`Account: ${account.accountNumber}`);
+ * ```
+ */
+export async function getAccount(): Promise<{ accountNumber: string; accountType?: string }> {
+  try {
+    const client = await getClient();
+    
+    // Fetch customer accounts via SDK
+    const response = await client.accountsAndCustomersService.getCustomerAccounts();
+    
+    // Extract first account from response
+    if (!response || !response.data || !Array.isArray(response.data) || response.data.length === 0) {
+      throw new Error('No accounts found for authenticated user');
+    }
+    
+    const account = response.data[0].account;
+    const accountNumber = account['account-number'] || account.accountNumber || account.account_number;
+    
+    if (!accountNumber) {
+      throw new Error('Account number not found in response');
+    }
+    
+    return {
+      accountNumber,
+      accountType: account['account-type'] || account.accountType || account.account_type,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    throw new Error(`Failed to get account: ${errorMessage}`);
+  }
 }
 

@@ -1,29 +1,58 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { BookOpen, Plus, Trash2, Copy, Check } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useTokens } from '@/hooks/useTokens';
 import { useIsMobile } from '@/components/ui/use-mobile';
 import { useToast } from '@/components/ui';
-
-interface PresetTemplate {
-  id: string;
-  name: string;
-  description: string;
-  underlying: 'SPX' | 'QQQ' | 'SPY';
-  strategy: 'Vertical' | 'Butterfly';
-  direction: 'CALL' | 'PUT';
-  targetDelta: number;
-  width: number;
-  tpPct: number;
-  slPct: number;
-  timeExit?: string;
-}
+import type { PresetTemplate } from '@/types';
 
 const MOCK_TEMPLATES: PresetTemplate[] = [
   {
     id: '1',
+    name: 'SPX 50Δ 10-Wide Put Vertical (Max P&L)',
+    description: 'Highest average P&L: 91% win rate, $73.83 avg P&L. Based on 2.5yr backtest. Close at noon if TP not hit.',
+    underlying: 'SPX',
+    strategy: 'Vertical',
+    direction: 'PUT',
+    targetDelta: 50,
+    width: 10,
+    ruleBundle: {
+      takeProfitPct: 50,
+      stopLossPct: 100,
+      timeExit: '12:00',
+    },
+    exitStrategy: 'both',
+    entryWindow: '09:00',
+    source: 'user',
+    autoArm: false,
+    tags: ['0DTE', 'high-pnl', 'noon-exit'],
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: '2',
+    name: 'SPX 30Δ 10-Wide Put Vertical (Max Win Rate)',
+    description: 'Highest win rate: 95% win rate, $57.92 avg P&L. Based on 2.5yr backtest. Close at noon if TP not hit.',
+    underlying: 'SPX',
+    strategy: 'Vertical',
+    direction: 'PUT',
+    targetDelta: 30,
+    width: 10,
+    ruleBundle: {
+      takeProfitPct: 35,
+      stopLossPct: 100,
+      timeExit: '12:00',
+    },
+    exitStrategy: 'both',
+    entryWindow: '09:00',
+    source: 'user',
+    autoArm: false,
+    tags: ['0DTE', 'high-win-rate', 'noon-exit'],
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: '3',
     name: 'SPX 50Δ 10-Wide Call Vertical',
     description: 'Standard momentum scalp for SPX',
     underlying: 'SPX',
@@ -31,12 +60,19 @@ const MOCK_TEMPLATES: PresetTemplate[] = [
     direction: 'CALL',
     targetDelta: 50,
     width: 10,
-    tpPct: 50,
-    slPct: 100,
-    timeExit: '13:00',
+    ruleBundle: {
+      takeProfitPct: 50,
+      stopLossPct: 100,
+      timeExit: '13:00',
+    },
+    exitStrategy: 'both',
+    source: 'user',
+    autoArm: false,
+    tags: ['0DTE'],
+    createdAt: new Date().toISOString(),
   },
   {
-    id: '2',
+    id: '4',
     name: 'SPX 40Δ 5-Wide Call Vertical',
     description: 'Tighter risk, lower delta',
     underlying: 'SPX',
@@ -44,12 +80,19 @@ const MOCK_TEMPLATES: PresetTemplate[] = [
     direction: 'CALL',
     targetDelta: 40,
     width: 5,
-    tpPct: 50,
-    slPct: 100,
-    timeExit: '13:00',
+    ruleBundle: {
+      takeProfitPct: 50,
+      stopLossPct: 100,
+      timeExit: '13:00',
+    },
+    exitStrategy: 'both',
+    source: 'user',
+    autoArm: false,
+    tags: ['0DTE', 'low-risk'],
+    createdAt: new Date().toISOString(),
   },
   {
-    id: '3',
+    id: '5',
     name: 'QQQ 50Δ 10-Wide Put Vertical',
     description: 'Tech momentum play',
     underlying: 'QQQ',
@@ -57,11 +100,20 @@ const MOCK_TEMPLATES: PresetTemplate[] = [
     direction: 'PUT',
     targetDelta: 50,
     width: 10,
-    tpPct: 50,
-    slPct: 100,
-    timeExit: '13:00',
+    ruleBundle: {
+      takeProfitPct: 50,
+      stopLossPct: 100,
+      timeExit: '13:00',
+    },
+    exitStrategy: 'both',
+    source: 'user',
+    autoArm: false,
+    tags: ['0DTE', 'tech'],
+    createdAt: new Date().toISOString(),
   },
 ];
+
+const STORAGE_KEY = 'vibesnipe_templates';
 
 export function Library() {
   const isMobile = useIsMobile();
@@ -69,8 +121,37 @@ export function Library() {
   const colors = tokens.colors;
   const toast = useToast();
   
-  const [templates] = useState<PresetTemplate[]>(MOCK_TEMPLATES);
+  const [templates, setTemplates] = useState<PresetTemplate[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // Load templates from localStorage on mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsedTemplates = JSON.parse(stored);
+        setTemplates(parsedTemplates);
+      } else {
+        // First time - use mock templates
+        setTemplates(MOCK_TEMPLATES);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(MOCK_TEMPLATES));
+      }
+    } catch (err) {
+      console.error('Failed to load templates:', err);
+      setTemplates(MOCK_TEMPLATES);
+    }
+  }, []);
+
+  // Save templates to localStorage whenever they change
+  useEffect(() => {
+    if (templates.length > 0) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(templates));
+      } catch (err) {
+        console.error('Failed to save templates:', err);
+      }
+    }
+  }, [templates]);
 
   const handleCopy = (template: PresetTemplate) => {
     // Copy template to clipboard
@@ -231,7 +312,7 @@ export function Library() {
                   border: `1px solid ${colors.semantic.profit}40`,
                   color: colors.semantic.profit,
                 }}>
-                  TP {template.tpPct}%
+                  TP {template.ruleBundle.takeProfitPct}%
                 </span>
                 <span style={{
                   padding: `${tokens.space.xs}px ${tokens.space.sm}px`,
@@ -241,9 +322,9 @@ export function Library() {
                   border: `1px solid ${colors.semantic.risk}40`,
                   color: colors.semantic.risk,
                 }}>
-                  SL {template.slPct}%
+                  SL {template.ruleBundle.stopLossPct}%
                 </span>
-                {template.timeExit && (
+                {template.ruleBundle.timeExit && (
                   <span style={{
                     padding: `${tokens.space.xs}px ${tokens.space.sm}px`,
                     borderRadius: `${tokens.radius.sm}px`,
@@ -252,7 +333,19 @@ export function Library() {
                     border: `1px solid ${colors.semantic.warning}40`,
                     color: colors.semantic.warning,
                   }}>
-                    Exit {template.timeExit}
+                    Exit {template.ruleBundle.timeExit}
+                  </span>
+                )}
+                {template.entryWindow && (
+                  <span style={{
+                    padding: `${tokens.space.xs}px ${tokens.space.sm}px`,
+                    borderRadius: `${tokens.radius.sm}px`,
+                    fontSize: `${tokens.type.sizes.xs}px`,
+                    backgroundColor: colors.semantic.info + '15',
+                    border: `1px solid ${colors.semantic.info}40`,
+                    color: colors.semantic.info,
+                  }}>
+                    Entry {template.entryWindow}
                   </span>
                 )}
               </div>

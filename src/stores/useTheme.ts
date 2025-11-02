@@ -10,7 +10,7 @@ interface ThemeStore {
 }
 
 export const useTheme = create<ThemeStore>((set) => ({
-  theme: (typeof window !== 'undefined' && localStorage.getItem('theme') as Theme) || 'dark',
+  theme: 'dark', // Default, will be updated on mount
   toggle: () => {
     set((state) => {
       const newTheme = state.theme === 'dark' ? 'light' : 'dark';

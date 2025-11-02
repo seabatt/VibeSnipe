@@ -19,7 +19,7 @@ export const quoteEmitter = new EventEmitter();
  * Active WebSocket connection instance.
  * Managed internally by the SDK's quote streamer.
  */
-let quoteStreamer: any = null;
+let quoteStreamer: any = null; // Type: QuoteStreamer from @tastytrade/api
 
 /**
  * Currently subscribed symbols.
@@ -54,24 +54,38 @@ export async function connect(): Promise<void> {
   try {
     const client = await getClient();
     
-    // Initialize quote streamer from SDK
-    // NOTE: Adjust this based on actual @tastytrade/api SDK quote streamer API
-    // Example pattern (adjust to match actual SDK):
-    // quoteStreamer = client.dxLink.createQuoteStreamer();
-    // quoteStreamer.on('quote', handleQuoteUpdate);
-    // quoteStreamer.on('error', handleError);
-    // await quoteStreamer.connect();
-
-    console.warn(
-      'Quote streamer not yet implemented. Install @tastytrade/api and update with actual SDK quote streamer API.'
-    );
-
-    // Placeholder: In a real implementation, this would be:
-    // - Initialize the SDK's quote streamer
-    // - Set up event handlers for quote updates
-    // - Handle connection lifecycle
-    // - Manage reconnection logic
-
+    // Import QuoteStreamer from SDK
+    // The QuoteStreamer is a separate export from the SDK
+    const { QuoteStreamer } = await import('@tastytrade/api');
+    
+    // QuoteStreamer requires a quote token and URL
+    // Get quote token from SDK's accountsAndCustomersService
+    const tokenResponse = await client.accountsAndCustomersService.getQuoteStreamerTokens();
+    
+    // Extract quote token from response
+    // Response format may vary - handle different structures
+    const quoteToken = tokenResponse?.data?.token || 
+                       tokenResponse?.token || 
+                       tokenResponse?.quoteToken ||
+                       (Array.isArray(tokenResponse) && tokenResponse.length > 0 
+                         ? tokenResponse[0].token || tokenResponse[0]
+                         : '');
+    
+    if (!quoteToken) {
+      throw new Error('Quote token not available - authentication required');
+    }
+    
+    // Determine quote streamer URL based on environment
+    const quoteUrl = client.baseUrl.includes('cert') 
+      ? 'wss://dxlink.cert.tastytrade.com'
+      : 'wss://dxlink.tastytrade.com';
+    
+    // Initialize quote streamer with token and URL
+    quoteStreamer = new QuoteStreamer(quoteToken, quoteUrl);
+    
+    // Connect to the quote streamer
+    quoteStreamer.connect();
+    
     isConnected = true;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -89,20 +103,58 @@ export async function connect(): Promise<void> {
  */
 function handleQuoteUpdate(rawQuote: any): void {
   try {
-    // Normalize quote data from SDK format to GreekQuote
-    // NOTE: Adjust mapping based on actual SDK quote structure
+    // Normalize quote data from SDK/DXLink format to GreekQuote
+    // DXLink events can have various structures - handle common patterns
+    const symbol = rawQuote.eventSymbol || 
+                   rawQuote.symbol || 
+                   rawQuote.streamerSymbol || 
+                   rawQuote.sym || 
+                   '';
+    
+    // Extract bid/ask from various possible field names
+    const bid = rawQuote.bid !== undefined ? parseFloat(rawQuote.bid) :
+                rawQuote.bidPrice !== undefined ? parseFloat(rawQuote.bidPrice) :
+                rawQuote.bid_price !== undefined ? parseFloat(rawQuote.bid_price) : 0;
+    
+    const ask = rawQuote.ask !== undefined ? parseFloat(rawQuote.ask) :
+                rawQuote.askPrice !== undefined ? parseFloat(rawQuote.askPrice) :
+                rawQuote.ask_price !== undefined ? parseFloat(rawQuote.ask_price) : 0;
+    
+    // Calculate mark from bid/ask if not provided
+    const mark = rawQuote.mark !== undefined ? parseFloat(rawQuote.mark) :
+                 rawQuote.midpoint !== undefined ? parseFloat(rawQuote.midpoint) :
+                 rawQuote.mid !== undefined ? parseFloat(rawQuote.mid) :
+                 (bid > 0 && ask > 0 ? (bid + ask) / 2 : 0);
+    
+    // Extract Greeks from various possible field names
+    const delta = rawQuote.delta !== undefined ? parseFloat(rawQuote.delta) :
+                  rawQuote.Delta !== undefined ? parseFloat(rawQuote.Delta) : undefined;
+    
+    const gamma = rawQuote.gamma !== undefined ? parseFloat(rawQuote.gamma) :
+                  rawQuote.Gamma !== undefined ? parseFloat(rawQuote.Gamma) : undefined;
+    
+    const theta = rawQuote.theta !== undefined ? parseFloat(rawQuote.theta) :
+                  rawQuote.Theta !== undefined ? parseFloat(rawQuote.Theta) : undefined;
+    
+    const vega = rawQuote.vega !== undefined ? parseFloat(rawQuote.vega) :
+                 rawQuote.Vega !== undefined ? parseFloat(rawQuote.Vega) : undefined;
+    
+    // Extract timestamp
+    const timestamp = rawQuote.time !== undefined ? new Date(rawQuote.time).toISOString() :
+                     rawQuote.timestamp !== undefined ? new Date(rawQuote.timestamp).toISOString() :
+                     rawQuote.eventTime !== undefined ? new Date(rawQuote.eventTime).toISOString() :
+                     new Date().toISOString();
+    
     const normalizedQuote: GreekQuote = {
-      symbol: rawQuote.symbol || rawQuote.streamerSymbol || '',
-      bid: parseFloat(rawQuote.bid || rawQuote.bidPrice || '0'),
-      ask: parseFloat(rawQuote.ask || rawQuote.askPrice || '0'),
-      mark: parseFloat(rawQuote.mark || rawQuote.midpoint || 
-        ((parseFloat(rawQuote.bid || rawQuote.bidPrice || '0') + 
-          parseFloat(rawQuote.ask || rawQuote.askPrice || '0')) / 2)),
-      delta: rawQuote.delta !== undefined ? parseFloat(rawQuote.delta) : undefined,
-      gamma: rawQuote.gamma !== undefined ? parseFloat(rawQuote.gamma) : undefined,
-      theta: rawQuote.theta !== undefined ? parseFloat(rawQuote.theta) : undefined,
-      vega: rawQuote.vega !== undefined ? parseFloat(rawQuote.vega) : undefined,
-      timestamp: rawQuote.timestamp || rawQuote.quoteTime || new Date().toISOString(),
+      symbol,
+      bid,
+      ask,
+      mark,
+      delta,
+      gamma,
+      theta,
+      vega,
+      timestamp,
     };
 
     // Emit the normalized quote
@@ -163,16 +215,16 @@ export async function subscribeQuotes(symbols: string[]): Promise<void> {
 
   try {
     // Subscribe via SDK quote streamer
-    // NOTE: Adjust this based on actual SDK API
-    // Example:
-    // await quoteStreamer.subscribe(newSymbols);
-
-    // Add to subscribed set
-    newSymbols.forEach(symbol => subscribedSymbols.add(symbol));
-
-    console.warn(
-      `Quote subscription not yet implemented. Would subscribe to: ${newSymbols.join(', ')}`
-    );
+    // QuoteStreamer.subscribe() takes (dxfeedSymbol, eventHandler) for each symbol
+    newSymbols.forEach(symbol => {
+      // Subscribe each symbol with event handler
+      quoteStreamer.subscribe(symbol, (event: any) => {
+        handleQuoteUpdate(event);
+      });
+      
+      // Add to subscribed set
+      subscribedSymbols.add(symbol);
+    });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     throw new Error(`Failed to subscribe to quotes: ${errorMessage}`);
@@ -197,17 +249,16 @@ export async function unsubscribeQuotes(): Promise<void> {
   }
 
   try {
-    // Unsubscribe via SDK
-    // NOTE: Adjust this based on actual SDK API
-    // Example:
-    // await quoteStreamer.unsubscribeAll();
-    // await quoteStreamer.disconnect();
+    // Unsubscribe and disconnect via SDK
+    // Note: SDK may have unsubscribe method or we may need to track subscriptions manually
+    // For now, disconnect and clear subscriptions
+    if (quoteStreamer && typeof quoteStreamer.disconnect === 'function') {
+      await quoteStreamer.disconnect();
+    }
 
     subscribedSymbols.clear();
     isConnected = false;
     quoteStreamer = null;
-
-    console.warn('Quote unsubscription not yet implemented.');
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     console.error(`Error unsubscribing from quotes: ${errorMessage}`);

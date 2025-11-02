@@ -7,8 +7,8 @@
  */
 
 import { NextResponse } from 'next/server';
-import { quoteEmitter, subscribeQuotes, unsubscribeQuotes } from '@/lib/tastytrade';
-import type { GreekQuote } from '@/lib/tastytrade';
+import { quoteEmitter, subscribeQuotes, unsubscribeQuotes } from '@/lib/tastytrade/marketData';
+import type { GreekQuote } from '@/lib/tastytrade/types';
 
 /**
  * GET handler for quote streaming via SSE.

@@ -1,7 +1,9 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { Sun, Monitor, Moon } from 'lucide-react';
 import { useTheme as useThemeStore, useThemeInit } from '@/stores/useTheme';
+import { useTokens } from '@/hooks/useTokens';
 
 type Theme = 'dark' | 'light' | 'auto';
 
@@ -16,11 +18,13 @@ const ThemeContextInternal = createContext<ThemeContextType | undefined>(undefin
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>('auto');
   const [resolvedTheme, setResolvedTheme] = useState<'dark' | 'light'>('dark');
+  const [mounted, setMounted] = useState(false);
   const storeTheme = useThemeInit();
   const { setTheme: setStoreTheme } = useThemeStore();
 
   // Determine resolved theme from preference
   const getResolvedTheme = (pref: Theme): 'dark' | 'light' => {
+    if (!mounted) return 'dark';
     if (pref === 'auto') {
       return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     }
@@ -28,17 +32,20 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    setMounted(true);
     // Load theme preference from localStorage
     const stored = localStorage.getItem('theme-preference') as Theme | null;
     if (stored && ['dark', 'light', 'auto'].includes(stored)) {
       setThemeState(stored);
-      const resolved = getResolvedTheme(stored);
+      const resolved = stored === 'auto' 
+        ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+        : stored;
       setResolvedTheme(resolved);
       setStoreTheme(resolved);
       document.documentElement.setAttribute('data-theme', resolved);
     } else {
       // Default to auto
-      const resolved = getResolvedTheme('auto');
+      const resolved = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
       setResolvedTheme(resolved);
       setStoreTheme(resolved);
       document.documentElement.setAttribute('data-theme', resolved);
@@ -46,6 +53,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [setStoreTheme]);
 
   useEffect(() => {
+    if (!mounted) return;
     if (theme === 'auto') {
       const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
       const handler = (e: MediaQueryListEvent) => {
@@ -62,14 +70,19 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setStoreTheme(theme);
       document.documentElement.setAttribute('data-theme', theme);
     }
-  }, [theme, setStoreTheme]);
+  }, [theme, setStoreTheme, mounted]);
 
   const setTheme = (newTheme: Theme) => {
     setThemeState(newTheme);
-    localStorage.setItem('theme-preference', newTheme);
-    const resolved = getResolvedTheme(newTheme);
-    setResolvedTheme(resolved);
-    setStoreTheme(resolved);
+    if (mounted) {
+      localStorage.setItem('theme-preference', newTheme);
+      const resolved = newTheme === 'auto'
+        ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+        : newTheme;
+      setResolvedTheme(resolved);
+      setStoreTheme(resolved);
+      document.documentElement.setAttribute('data-theme', resolved);
+    }
   };
 
   return (
@@ -87,43 +100,63 @@ export function useThemeContext() {
   return context;
 }
 
-// ThemeToggle component
+// ThemeToggle component - matches Figma exactly
 export function ThemeToggle() {
   const { theme, setTheme } = useThemeContext();
+  const [isMobile, setIsMobile] = useState(false);
+  const tokens = useTokens();
+  const colors = tokens.colors;
+  
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+  
   const options: Theme[] = ['light', 'auto', 'dark'];
-  const labels: Record<Theme, string> = {
-    light: '☀️ Light',
-    auto: '🔄 Auto',
-    dark: '🌙 Dark',
-  };
 
   return (
-    <div className="flex items-center gap-4 border rounded-md p-4" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}>
-      {options.map((option) => (
+    <div style={{ 
+      display: 'flex',
+      backgroundColor: colors.surface,
+      border: `1px solid ${colors.border}`,
+      borderRadius: `${tokens.radius.md}px`,
+      padding: `${tokens.space.xs}px`,
+      gap: `${tokens.space.xs}px`,
+    }}>
+      {options.map((mode) => (
         <button
-          key={option}
-          onClick={() => setTheme(option)}
-          className={`px-12 py-4 text-sm font-medium rounded-md transition-colors duration-fast ${
-            theme === option
-              ? 'text-text-primary'
-              : 'text-text-secondary'
-          }`}
+          key={mode}
+          onClick={() => setTheme(mode)}
           style={{
-            backgroundColor: theme === option ? 'var(--surface-alt)' : 'transparent',
-            color: theme === option ? 'var(--text-primary)' : 'var(--text-secondary)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: `${tokens.space.xs}px`,
+            padding: `${tokens.space.xs}px ${tokens.space.md}px`,
+            backgroundColor: theme === mode ? colors.bg : 'transparent',
+            border: theme === mode ? `1px solid ${colors.border}` : '1px solid transparent',
+            borderRadius: `${tokens.space.sm}px`,
+            color: theme === mode ? colors.textPrimary : colors.textSecondary,
+            fontSize: `${tokens.type.sizes.xs}px`,
+            cursor: 'pointer',
+            transition: 'all 150ms ease-in-out',
           }}
           onMouseEnter={(e) => {
-            if (theme !== option) {
-              e.currentTarget.style.backgroundColor = 'var(--surface-alt)';
+            if (theme !== mode) {
+              e.currentTarget.style.backgroundColor = colors.surfaceAlt;
             }
           }}
           onMouseLeave={(e) => {
-            if (theme !== option) {
+            if (theme !== mode) {
               e.currentTarget.style.backgroundColor = 'transparent';
             }
           }}
         >
-          {labels[option]}
+          {mode === 'light' && <Sun size={12} />}
+          {mode === 'auto' && <Monitor size={12} />}
+          {mode === 'dark' && <Moon size={12} />}
+          <span>{mode.charAt(0).toUpperCase() + mode.slice(1)}</span>
         </button>
       ))}
     </div>

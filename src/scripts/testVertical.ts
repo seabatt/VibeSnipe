@@ -11,14 +11,9 @@
  * Run with: npx tsx src/scripts/testVertical.ts
  */
 
-import {
-  getClient,
-  fetchOptionChain,
-  pickShortByDelta,
-  buildVertical,
-  dryRunVertical,
-  submitVertical,
-} from '../lib/tastytrade';
+import { getClient, getAccount } from '../lib/tastytrade/client';
+import { fetchOptionChain, pickShortByDelta, buildVertical, fetchAndBuildVertical } from '../lib/tastytrade/chains';
+import { dryRunVertical, submitVertical } from '../lib/tastytrade/orders';
 
 /**
  * Gets today's date in ISO format (YYYY-MM-DD).
@@ -35,25 +30,14 @@ function getTodayISO(): string {
 
 /**
  * Gets account ID from client.
- * This is a placeholder - actual implementation depends on SDK API.
  * 
  * @returns {Promise<string>} Account ID
  */
 async function getAccountId(): Promise<string> {
   try {
-    const client = await getClient();
-    
-    // NOTE: Adjust this based on actual @tastytrade/api SDK API
-    // Example:
-    // const accounts = await client.accounts.list();
-    // return accounts.data[0].accountNumber;
-
-    // For now, return a placeholder or get from environment
-    const accountId = process.env.TASTYTRADE_ACCOUNT_ID || 'DEMO-ACCOUNT';
-    
-    console.warn('⚠️  Using placeholder account ID. Update this with actual SDK account retrieval.');
-    
-    return accountId;
+    // Use getAccount() from client module
+    const account = await getAccount();
+    return account.accountNumber;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     throw new Error(`Failed to get account ID: ${errorMessage}`);

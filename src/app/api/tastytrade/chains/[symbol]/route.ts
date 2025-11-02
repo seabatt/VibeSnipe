@@ -7,7 +7,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { fetchOptionChain } from '@/lib/tastytrade';
+import { fetchOptionChain } from '@/lib/tastytrade/chains';
 
 /**
  * GET handler for option chain.

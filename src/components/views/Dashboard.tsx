@@ -4,22 +4,29 @@ import { useState, useEffect } from 'react';
 import { Clock, TrendingUp, TrendingDown, X, Target, StopCircle, History, ChevronRight } from 'lucide-react';
 import { useTokens } from '@/hooks/useTokens';
 import { useIsMobile } from '@/components/ui/use-mobile';
-import { useThemeContext, ThemeToggle } from '@/components/providers/ThemeProvider';
+import { useThemeContext } from '@/components/providers/ThemeProvider';
 import { useOrders } from '@/stores/useOrders';
 import { useQuotes } from '@/stores/useQuotes';
 import { useSchedule } from '@/stores/useSchedule';
-import { Position } from '@/types';
+import { Position, ScheduledBlock } from '@/types';
 
 export function Dashboard() {
+  const [mounted, setMounted] = useState(false);
   const isMobile = useIsMobile();
   const tokens = useTokens();
   const colors = tokens.colors;
   const { resolvedTheme } = useThemeContext();
   const { positions } = useOrders();
   const { blocks, getCurrentBlock, getNextBlock } = useSchedule();
-  const [currentBlock, setCurrentBlock] = useState(getCurrentBlock());
-  const [nextBlock, setNextBlock] = useState(getNextBlock());
+  const [currentBlock, setCurrentBlock] = useState<ScheduledBlock | null>(null);
+  const [nextBlock, setNextBlock] = useState<ScheduledBlock | null>(null);
   const [now, setNow] = useState(new Date());
+
+  useEffect(() => {
+    setMounted(true);
+    setCurrentBlock(getCurrentBlock());
+    setNextBlock(getNextBlock());
+  }, [getCurrentBlock, getNextBlock]);
 
   // Update current/next blocks and time every second
   useEffect(() => {
@@ -57,6 +64,7 @@ export function Dashboard() {
 
   // Get time remaining in current block
   const getTimeRemaining = (blockEndTime: string): string => {
+    if (!mounted) return '00:00';
     const [endHour, endMin] = blockEndTime.split(':').map(Number);
     const endMinutes = endHour * 60 + endMin;
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
@@ -65,6 +73,21 @@ export function Dashboard() {
     const secs = Math.max(0, 60 - now.getSeconds());
     return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
+
+  if (!mounted) {
+    return (
+      <div style={{ 
+        minHeight: '100vh',
+        backgroundColor: colors.bg,
+        color: colors.textPrimary,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}>
+        <p>Loading...</p>
+      </div>
+    );
+  }
 
   return (
     <div style={{ 
@@ -124,11 +147,6 @@ export function Dashboard() {
                 {isMobile ? '#4521' : 'Account #4521'}
               </span>
             </div>
-
-            {/* Theme Toggle */}
-            {!isMobile && (
-              <ThemeToggle />
-            )}
           </div>
         </div>
       </div>

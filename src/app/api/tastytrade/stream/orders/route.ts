@@ -7,7 +7,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { getClient } from '@/lib/tastytrade';
+import { getClient } from '@/lib/tastytrade/client';
 import { EventEmitter } from 'events';
 
 /**
@@ -37,29 +37,32 @@ async function connectAccountStream(accountId: string): Promise<void> {
     const client = await getClient();
     
     // Initialize account streamer from SDK
-    // NOTE: Adjust this based on actual @tastytrade/api SDK API
-    // Example pattern:
-    // accountStreamer = client.accountStreamer.create(accountId);
-    // accountStreamer.on('orderUpdate', (update) => {
-    //   orderUpdateEmitter.emit('order', update);
-    // });
-    // accountStreamer.on('positionUpdate', (update) => {
-    //   orderUpdateEmitter.emit('position', update);
-    // });
-    // accountStreamer.on('accountUpdate', (update) => {
-    //   orderUpdateEmitter.emit('account', update);
-    // });
-    // await accountStreamer.connect();
-
-    console.warn(
-      'Account streamer not yet implemented. Would connect for account:', accountId
-    );
-
-    // Placeholder: In a real implementation, this would:
-    // - Initialize the SDK's account streamer
-    // - Set up event handlers for order/position/account updates
-    // - Handle connection lifecycle
-    // - Manage reconnection logic
+    // SDK's accountStreamer is available on the client
+    accountStreamer = client.accountStreamer;
+    
+    // Start the account streamer connection
+    // SDK account streamer needs to be started before subscribing
+    await accountStreamer.start();
+    
+    // Subscribe to account updates
+    // SDK account streamer uses addMessageObserver to listen for updates
+    accountStreamer.addMessageObserver((message: any) => {
+      // Handle different message types from account streamer
+      // Message structure may vary - normalize to our event format
+      if (message.type === 'order' || message['order-update'] || message.status === 'order') {
+        orderUpdateEmitter.emit('order', message.data || message);
+      }
+      if (message.type === 'position' || message['position-update'] || message.status === 'position') {
+        orderUpdateEmitter.emit('position', message.data || message);
+      }
+      if (message.type === 'account' || message['account-update'] || message.status === 'account') {
+        orderUpdateEmitter.emit('account', message.data || message);
+      }
+    });
+    
+    // Subscribe to specific account
+    // SDK requires explicit subscription to accounts after starting
+    await accountStreamer.subscribeToAccounts([accountId]);
 
     isAccountStreamConnected = true;
   } catch (error) {

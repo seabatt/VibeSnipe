@@ -21,7 +21,7 @@
  */
 
 // Client
-export { getClient, resetClient, getEnv } from './client';
+export { getClient, resetClient, getEnv, getAccount } from './client';
 
 // Market Data
 export {

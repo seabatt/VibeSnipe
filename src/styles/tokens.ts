@@ -50,7 +50,7 @@ export const space = {
   xxxl: 48,
 };
 
-export const radius = { sm: 8, md: 12, lg: 16 };
+export const radius = { sm: 8, md: 12, lg: 16, xl: 20 };
 
 export const elevation = {
   none: "none",
