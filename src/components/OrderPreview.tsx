@@ -5,8 +5,6 @@ import { AlertCircle, Plus, Minus } from 'lucide-react';
 import { useOrders } from '@/stores/useOrders';
 import { useQuotes } from '@/stores/useQuotes';
 import { useTokens } from '@/hooks/useTokens';
-import { submitVertical } from '@/lib/tastytrade/orders';
-import type { VerticalLegs } from '@/lib/tastytrade/types';
 import { RiskGraph } from './RiskGraph';
 import { TradeLeg, RuleBundle } from '@/types';
 import { Button } from '@/components/ui';

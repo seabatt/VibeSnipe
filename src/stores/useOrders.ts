@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { TradeLeg, RuleBundle, OrderState, Position, Underlying, StrategyKind } from '@/types';
 import type { AppOrder, OrderLeg } from '@/lib/tastytrade/types';
+import { logger } from '@/lib/logger';
+import { useTradeStateMachine } from './useTradeStateMachine';
 
 export interface PendingOrder {
   legs: TradeLeg[];
@@ -29,12 +31,16 @@ interface OrdersStore {
   pendingOrder: PendingOrder | null;
   positions: Position[];
   workingOrders: WorkingOrder[];
+  eventSource: EventSource | null;
+  currentAccountId: string | null;
   setPendingOrder: (order: PendingOrder | null) => void;
   addPosition: (position: Position) => void;
   updatePosition: (id: string, updates: Partial<Position>) => void;
   removePosition: (id: string) => void;
   subscribeToOrders: (accountId: string) => void;
   unsubscribeFromOrders: () => void;
+  // Trade state machine integration
+  initializeTradeStateMachine: () => void;
 }
 
 /**
@@ -110,14 +116,12 @@ function mapPositionUpdateToPosition(update: any): Position | null {
   };
 }
 
-export const useOrders = create<OrdersStore>((set, get) => {
-  let eventSource: EventSource | null = null;
-  let currentAccountId: string | null = null;
-
-  return {
+export const useOrders = create<OrdersStore>((set, get) => ({
   pendingOrder: null,
   positions: [],
-    workingOrders: [],
+  workingOrders: [],
+  eventSource: null,
+  currentAccountId: null,
   setPendingOrder: (order) => set({ pendingOrder: order }),
   addPosition: (position) =>
     set((state) => ({ positions: [...state.positions, position] })),
@@ -135,17 +139,15 @@ export const useOrders = create<OrdersStore>((set, get) => {
       // Cleanup existing subscription
       get().unsubscribeFromOrders();
 
-      // Store current account ID
-      currentAccountId = accountId;
-
       // Build SSE URL with accountId query parameter
       const url = `/api/tastytrade/stream/orders?accountId=${encodeURIComponent(accountId)}`;
 
       // Create EventSource connection
-      eventSource = new EventSource(url);
+      const newEventSource = new EventSource(url);
+      set({ eventSource: newEventSource, currentAccountId: accountId });
 
       // Handle order updates
-      eventSource.addEventListener('order', (event: MessageEvent) => {
+      newEventSource.addEventListener('order', (event: MessageEvent) => {
         try {
           const orderUpdate: AppOrder = JSON.parse(event.data);
           const workingOrder = mapAppOrderToWorkingOrder(orderUpdate);
@@ -205,18 +207,18 @@ export const useOrders = create<OrdersStore>((set, get) => {
             return { workingOrders: updatedWorkingOrders };
           });
         } catch (error) {
-          console.error('Error parsing order update event:', error);
+          logger.error('Error parsing order update event', undefined, error as Error);
         }
       });
 
       // Handle position updates
-      eventSource.addEventListener('position', (event: MessageEvent) => {
+      newEventSource.addEventListener('position', (event: MessageEvent) => {
         try {
           const positionUpdate = JSON.parse(event.data);
           const position = mapPositionUpdateToPosition(positionUpdate);
 
           if (!position) {
-            console.warn('Invalid position update format:', positionUpdate);
+            logger.warn('Invalid position update format', { positionUpdate });
             return;
           }
 
@@ -237,53 +239,57 @@ export const useOrders = create<OrdersStore>((set, get) => {
             }
           });
         } catch (error) {
-          console.error('Error parsing position update event:', error);
+          logger.error('Error parsing position update event', undefined, error as Error);
         }
       });
 
       // Handle account updates (e.g., balance changes)
-      eventSource.addEventListener('account', (event: MessageEvent) => {
+      newEventSource.addEventListener('account', (event: MessageEvent) => {
         try {
           const accountUpdate = JSON.parse(event.data);
-          console.log('Account update received:', accountUpdate);
+          logger.info('Account update received', { accountUpdate });
           // Handle account-level updates if needed
         } catch (error) {
-          console.error('Error parsing account update event:', error);
+          logger.error('Error parsing account update event', undefined, error as Error);
         }
       });
 
       // Handle connection events
-      eventSource.addEventListener('connected', (event: MessageEvent) => {
-        console.log('Order/account stream connected:', event.data);
+      newEventSource.addEventListener('connected', (event: MessageEvent) => {
+        logger.info('Order/account stream connected', { data: event.data });
       });
 
       // Handle errors (network/connection errors)
-      eventSource.onerror = (event) => {
-        console.error('Order stream connection error:', event);
+      newEventSource.onerror = (event) => {
+        logger.error('Order stream connection error', { event });
         // EventSource will automatically attempt to reconnect
       };
 
       // Handle custom error events from server (these are SSE messages, not connection errors)
-      eventSource.addEventListener('error', (event: MessageEvent) => {
+      newEventSource.addEventListener('error', (event: MessageEvent) => {
         try {
           const errorData = JSON.parse(event.data);
-          console.error('Order stream server error:', errorData);
+          logger.error('Order stream server error', { error: errorData });
         } catch (e) {
           // Ignore parse errors for non-JSON error messages
         }
       });
     },
     unsubscribeFromOrders: () => {
+      const { eventSource } = get();
+      
       // Close EventSource connection
       if (eventSource) {
         eventSource.close();
-        eventSource = null;
+        set({ eventSource: null, currentAccountId: null });
       }
-
-      currentAccountId = null;
-
-      // Optionally clear working orders (may want to keep for UI)
-      // set({ workingOrders: [] });
     },
-  };
-});
+    initializeTradeStateMachine: () => {
+      // Initialize the trade state machine when orders store is set up
+      const tsm = useTradeStateMachine.getState();
+      if (!tsm.initialized) {
+        tsm.initialize();
+        logger.info('Trade state machine initialized from useOrders store');
+      }
+    },
+  }));

@@ -136,6 +136,8 @@ export interface AppOrder {
   updatedAt?: string;
   /** Error message if order failed */
   error?: string;
+  /** Optional metadata (for audit trail) */
+  metadata?: Record<string, any>;
 }
 
 /**

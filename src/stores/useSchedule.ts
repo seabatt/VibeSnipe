@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { ScheduledBlock, Underlying } from '@/types';
+import { logger } from '@/lib/logger';
 
 const STORAGE_KEY = 'vibesnipe_schedule_blocks';
 
@@ -12,7 +13,7 @@ const loadBlocks = (): ScheduledBlock[] => {
       return JSON.parse(stored);
     }
   } catch (error) {
-    console.error('Failed to load schedule blocks:', error);
+    logger.error('Failed to load schedule blocks', undefined, error as Error);
   }
   return [];
 };
@@ -23,7 +24,7 @@ const saveBlocks = (blocks: ScheduledBlock[]) => {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(blocks));
   } catch (error) {
-    console.error('Failed to save schedule blocks:', error);
+    logger.error('Failed to save schedule blocks', { count: blocks.length }, error as Error);
   }
 };
 

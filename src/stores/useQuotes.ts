@@ -1,11 +1,14 @@
 import { create } from 'zustand';
 import { subscribeQuotes } from '@/lib/tastytrade/marketData';
 import type { GreekQuote } from '@/lib/tastytrade/types';
+import { logger } from '@/lib/logger';
 
 type QuoteMsg = { symbol: string; last: number; bid?: number; ask?: number; ts: number };
 
 interface QuotesStore {
   quotes: Map<string, QuoteMsg>;
+  eventSource: EventSource | null;
+  currentSymbols: string[];
   subscribe: (symbols: string[]) => void;
   unsubscribe: () => void;
   getQuote: (symbol: string) => QuoteMsg | undefined;
@@ -26,24 +29,19 @@ function mapGreekQuoteToQuoteMsg(greekQuote: GreekQuote): QuoteMsg {
   };
 }
 
-export const useQuotes = create<QuotesStore>((set, get) => {
-  let eventSource: EventSource | null = null;
-  let currentSymbols: string[] = [];
-
-  return {
-    quotes: new Map(),
-    subscribe: async (symbols: string[]) => {
+export const useQuotes = create<QuotesStore>((set, get) => ({
+  quotes: new Map(),
+  eventSource: null,
+  currentSymbols: [],
+  subscribe: async (symbols: string[]) => {
       // Cleanup existing subscriptions
       get().unsubscribe();
-
-      // Update current symbols
-      currentSymbols = symbols;
 
       // Subscribe to quotes on the backend
       try {
         await subscribeQuotes(symbols);
       } catch (error) {
-        console.error('Failed to subscribe to quotes:', error);
+        logger.error('Failed to subscribe to quotes', { symbols }, error as Error);
       }
 
       // Build SSE URL with symbols query parameter
@@ -51,10 +49,11 @@ export const useQuotes = create<QuotesStore>((set, get) => {
       const url = `/api/tastytrade/stream/quotes?symbols=${encodeURIComponent(symbolsParam)}`;
 
       // Create EventSource connection
-      eventSource = new EventSource(url);
+      const newEventSource = new EventSource(url);
+      set({ eventSource: newEventSource, currentSymbols: symbols });
 
       // Handle quote events
-      eventSource.addEventListener('quote', (event: MessageEvent) => {
+      newEventSource.addEventListener('quote', (event: MessageEvent) => {
         try {
           const greekQuote: GreekQuote = JSON.parse(event.data);
           const quoteMsg = mapGreekQuoteToQuoteMsg(greekQuote);
@@ -65,43 +64,39 @@ export const useQuotes = create<QuotesStore>((set, get) => {
             return { quotes: newQuotes };
           });
         } catch (error) {
-          console.error('Error parsing quote event:', error);
+          logger.error('Error parsing quote event', undefined, error as Error);
         }
       });
 
       // Handle connection events
-      eventSource.addEventListener('connected', (event: MessageEvent) => {
-        console.log('Quote stream connected:', event.data);
+      newEventSource.addEventListener('connected', (event: MessageEvent) => {
+        logger.info('Quote stream connected', { data: event.data });
       });
 
       // Handle errors (network/connection errors)
-      eventSource.onerror = (event) => {
-        console.error('Quote stream connection error:', event);
+      newEventSource.onerror = (event) => {
+        logger.error('Quote stream connection error', { event });
         // EventSource will automatically attempt to reconnect
       };
 
       // Handle custom error events from server
-      eventSource.addEventListener('error', (event: MessageEvent) => {
+      newEventSource.addEventListener('error', (event: MessageEvent) => {
         try {
           const errorData = JSON.parse(event.data);
-          console.error('Quote stream server error:', errorData);
+          logger.error('Quote stream server error', { error: errorData });
         } catch (e) {
           // Ignore parse errors
         }
       });
     },
     unsubscribe: () => {
+      const { eventSource } = get();
+      
       // Close EventSource connection
       if (eventSource) {
         eventSource.close();
-        eventSource = null;
+        set({ eventSource: null, currentSymbols: [] });
       }
-      
-      currentSymbols = [];
-      
-      // Clear quotes (optional - may want to keep last known quotes)
-      // set({ quotes: new Map() });
     },
     getQuote: (symbol: string) => get().quotes.get(symbol),
-  };
-});
+  }));

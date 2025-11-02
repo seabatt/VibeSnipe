@@ -7,6 +7,9 @@
 
 import TastytradeClient from '@tastytrade/api';
 import type { TastytradeEnv } from './types';
+import { logger } from '../logger';
+import { AuthenticationError } from '../errors';
+import { getTastytradeConfig } from '../env';
 
 /**
  * Type alias for the Tastytrade SDK client instance.
@@ -44,23 +47,8 @@ export async function getClient(): Promise<TastytradeSDK> {
   }
 
   // Validate required environment variables
-  const env = process.env.TASTYTRADE_ENV as TastytradeEnv;
-  const clientSecret = process.env.TASTYTRADE_CLIENT_SECRET;
-  const refreshToken = process.env.TASTYTRADE_REFRESH_TOKEN;
-
-  if (!env || (env !== 'prod' && env !== 'sandbox')) {
-    throw new Error(
-      'TASTYTRADE_ENV must be set to "prod" or "sandbox"'
-    );
-  }
-
-  if (!clientSecret) {
-    throw new Error('TASTYTRADE_CLIENT_SECRET environment variable is required');
-  }
-
-  if (!refreshToken) {
-    throw new Error('TASTYTRADE_REFRESH_TOKEN environment variable is required');
-  }
+  const config = getTastytradeConfig();
+  const { env, clientSecret, refreshToken } = config;
 
   try {
     // Determine base URLs based on environment
@@ -95,10 +83,12 @@ export async function getClient(): Promise<TastytradeSDK> {
       };
     }
 
+    logger.info('Tastytrade client initialized', { env });
     return clientInstance;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    throw new Error(`Failed to initialize Tastytrade client: ${errorMessage}`);
+    logger.error('Failed to initialize Tastytrade client', { env }, error as Error);
+    throw new AuthenticationError(`Failed to initialize Tastytrade client: ${errorMessage}`);
   }
 }
 
@@ -160,13 +150,15 @@ export async function getAccount(): Promise<{ accountNumber: string; accountType
       throw new Error('Account number not found in response');
     }
     
+    logger.info('Account fetched', { accountNumber });
     return {
       accountNumber,
       accountType: account['account-type'] || account.accountType || account.account_type,
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    throw new Error(`Failed to get account: ${errorMessage}`);
+    logger.error('Failed to get account', undefined, error as Error);
+    throw new AuthenticationError(`Failed to get account: ${errorMessage}`);
   }
 }
 

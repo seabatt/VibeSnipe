@@ -9,6 +9,7 @@
 import { NextResponse } from 'next/server';
 import { quoteEmitter, subscribeQuotes, unsubscribeQuotes } from '@/lib/tastytrade/marketData';
 import type { GreekQuote } from '@/lib/tastytrade/types';
+import { logger } from '@/lib/logger';
 
 /**
  * GET handler for quote streaming via SSE.
@@ -67,7 +68,7 @@ export async function GET(request: Request) {
           try {
             sendEvent('quote', quote);
           } catch (error) {
-            console.error('Error sending quote event:', error);
+            logger.error('Error sending quote event', { symbol: quote.symbol }, error as Error);
           }
         };
 
@@ -79,7 +80,7 @@ export async function GET(request: Request) {
               timestamp: new Date().toISOString(),
             });
           } catch (err) {
-            console.error('Error sending error event:', err);
+            logger.error('Error sending error event', undefined, err as Error);
           }
         };
 
@@ -94,8 +95,9 @@ export async function GET(request: Request) {
           quoteEmitter.removeListener('error', onError);
           
           // Unsubscribe from quotes (optional - may want to keep subscriptions active)
-          unsubscribeQuotes().catch(console.error);
+          unsubscribeQuotes().catch(err => logger.error('Unsubscribe error', undefined, err));
           
+          logger.info('Quote stream client disconnected');
           controller.close();
         });
       },

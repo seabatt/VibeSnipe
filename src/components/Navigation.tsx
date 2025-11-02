@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import { Home, Sparkles, History as HistoryIcon, Settings as SettingsIcon, BookOpen, Menu, X } from 'lucide-react';
-import { useThemeContext } from '@/components/providers/ThemeProvider';
 import { useTokens } from '@/hooks/useTokens';
 
 type ViewId = 'home' | 'create-trade' | 'history' | 'settings' | 'library';
@@ -15,7 +14,6 @@ interface NavigationProps {
 export function Navigation({ activeView, onViewChange }: NavigationProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const { resolvedTheme } = useThemeContext();
   const tokens = useTokens();
   const colors = tokens.colors;
   

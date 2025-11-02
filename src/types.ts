@@ -1,6 +1,11 @@
 export type LegAction = 'BUY' | 'SELL';
 export type LegRight = 'CALL' | 'PUT';
 
+// Import TradeState from state machine
+export { TradeState } from './lib/tradeStateMachine';
+export type { TradeIntent } from './lib/tradeIntent';
+export type { TradeResult } from './lib/tradeOrchestrator';
+
 export interface TradeLeg {
   action: LegAction;
   right: LegRight;
@@ -43,6 +48,10 @@ export interface ScheduledBlock {
   toggles?: { autoArm: boolean; autoFire: boolean };
 }
 
+/**
+ * @deprecated Use TradeState from tradeStateMachine instead
+ * Kept for backward compatibility
+ */
 export type OrderState =
   | 'PENDING'
   | 'WORKING'
@@ -80,5 +89,12 @@ export interface PresetTemplate {
   entryWindow?: string; // "09:00" CT
   autoArm?: boolean;
   tags?: string[];
+  /** Strategy version for A/B testing */
+  strategyVersion?: string;
+  /** Chase strategy to use */
+  chaseStrategy?: string;
+  /** Risk rule set to use */
+  riskRuleSet?: string;
   createdAt: string;
+  lastModified?: string;
 }

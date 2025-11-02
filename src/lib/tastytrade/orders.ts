@@ -18,6 +18,8 @@ import type {
   OCOBracket,
   VerticalLegs,
 } from './types';
+import { logger, logOrderSubmission, logOrderFill } from '../logger';
+import { OrderRejectionError } from '../errors';
 
 /**
  * Performs a dry run validation of a vertical spread order.
@@ -227,10 +229,19 @@ export async function submitVertical(
     const response = await client.orderService.createOrder(accountId, payload);
     
     // Normalize SDK response to AppOrder format
-    return normalizeOrder(response, accountId);
+    const order = normalizeOrder(response, accountId);
+    
+    logOrderSubmission(
+      order.id,
+      accountId,
+      `${vertical.shortLeg.strike}/${vertical.longLeg.strike}`
+    );
+    
+    return order;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    throw new Error(`Failed to submit order: ${errorMessage}`);
+    logger.error('Failed to submit order', { accountId, quantity }, error as Error);
+    throw new OrderRejectionError(`Failed to submit order: ${errorMessage}`);
   }
 }
 
@@ -269,9 +280,11 @@ export async function cancelOrder(
       throw new Error(`Invalid order ID: ${orderId}`);
     }
     await client.orderService.cancelOrder(accountId, orderIdNum);
+    logger.info('Order cancelled', { orderId, accountId });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    throw new Error(`Failed to cancel order: ${errorMessage}`);
+    logger.error('Failed to cancel order', { orderId, accountId }, error as Error);
+    throw new OrderRejectionError(`Failed to cancel order: ${errorMessage}`, orderId);
   }
 }
 
@@ -338,10 +351,20 @@ export async function replaceOrder(
     const response = await client.orderService.replaceOrder(accountId, orderIdNum, replacePayload);
     
     // Normalize SDK response to AppOrder format
-    return normalizeOrder(response, accountId);
+    const order = normalizeOrder(response, accountId);
+    
+    logger.info('Order replaced', {
+      orderId,
+      accountId,
+      newPrice: updates.price,
+      newQuantity: updates.quantity,
+    });
+    
+    return order;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    throw new Error(`Failed to replace order: ${errorMessage}`);
+    logger.error('Failed to replace order', { orderId, accountId }, error as Error);
+    throw new OrderRejectionError(`Failed to replace order: ${errorMessage}`, orderId);
   }
 }
 

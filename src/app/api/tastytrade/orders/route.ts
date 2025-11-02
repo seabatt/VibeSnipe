@@ -4,12 +4,14 @@
  * POST /api/tastytrade/orders
  * 
  * Submits a vertical spread order based on kind, spec, and entry parameters.
+ * Now uses the orchestrator for full trade lifecycle management.
  */
 
 import { NextResponse } from 'next/server';
-import { submitVertical } from '@/lib/tastytrade/orders';
+import { executeTradeLifecycle } from '@/lib/tradeOrchestrator';
+import { buildTradeIntent, verticalLegsToTradeLegs } from '@/lib/tradeIntent';
 import { fetchAndBuildVertical } from '@/lib/tastytrade/chains';
-import type { VerticalLegs, EntryConfig, VerticalSpec } from '@/lib/tastytrade/types';
+import type { VerticalSpec } from '@/lib/tastytrade/types';
 
 /**
  * Request body structure for order submission.
@@ -93,22 +95,54 @@ export async function POST(request: Request) {
     const limitPrice = entry.limitPrice || entry.maxPrice;
     const orderType = entry.orderType || (limitPrice ? 'LIMIT' : 'MARKET');
 
-    // Submit the order
-    const order = await submitVertical(
-      vertical,
-      spec.quantity,
+    // Convert vertical legs to trade legs format
+    const legs = verticalLegsToTradeLegs(vertical, spec.quantity);
+
+    // Build trade intent from request
+    const intent = buildTradeIntent({
+      legs,
+      quantity: spec.quantity,
       limitPrice,
       orderType,
-      entry.accountId
+      ruleBundle: {
+        takeProfitPct: 50, // Default values
+        stopLossPct: 100,
+      },
+      accountId: entry.accountId,
+      source: 'manual',
+    });
+
+    // Execute trade lifecycle via orchestrator
+    const result = await executeTradeLifecycle(
+      intent,
+      vertical,
+      {
+        enableChase: true,
+        attachBrackets: true,
+      }
     );
 
+    // Return result based on state machine outcome
+    if (result.success) {
     return NextResponse.json({
-      orderId: order.id,
-      status: order.status,
-      accountId: order.accountId,
-      quantity: order.quantity,
-      netPrice: order.netPrice,
+        tradeId: result.trade.id,
+        orderId: result.order?.id,
+        status: result.trade.state,
+        accountId: entry.accountId,
+        quantity: spec.quantity,
+        netPrice: result.order?.netPrice,
+        brackets: result.brackets,
     });
+    } else {
+      return NextResponse.json(
+        {
+          tradeId: result.trade.id,
+          status: result.trade.state,
+          error: result.error,
+        },
+        { status: 500 }
+      );
+    }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     

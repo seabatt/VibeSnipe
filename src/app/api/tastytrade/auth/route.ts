@@ -7,30 +7,28 @@
  */
 
 import { NextResponse } from 'next/server';
-import { getClient, getEnv, getAccount } from '@/lib/tastytrade/client';
+import { getAccount } from '@/lib/tastytrade/client';
+import { env } from '@/lib/env';
 
 /**
  * GET handler for authentication status.
  * 
- * @param {Request} request - Next.js request object
  * @returns {Promise<NextResponse>} JSON response with status, env, and account info
  */
-export async function GET(request: Request) {
+export async function GET() {
   try {
     // Get environment configuration
-    const env = getEnv();
+    const tastytradeEnv = env.TASTYTRADE_ENV;
 
-    if (!env) {
+    if (!tastytradeEnv) {
       return NextResponse.json(
         { error: 'Tastytrade environment not configured' },
         { status: 500 }
       );
     }
 
-    // Initialize client (this will validate credentials)
-    const client = await getClient();
-
     // Get account information using getAccount() utility
+    // This will initialize the client internally to validate credentials
     const account = await getAccount();
     
     const accountInfo = {
@@ -41,7 +39,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       status: 'ok',
-      env,
+      env: tastytradeEnv,
       accountInfo,
     });
   } catch (error) {

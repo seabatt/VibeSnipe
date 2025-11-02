@@ -9,23 +9,50 @@
 import { EventEmitter } from 'events';
 import { replaceOrder } from './orders';
 import type { AppOrder } from './types';
+import { logger, logChaseAttempt } from '../logger';
+import {
+  type ChaseStrategy,
+  AGGRESSIVE_LINEAR,
+  getChaseStrategy,
+  validateChasePrice,
+  computeSlippage,
+  type ChasePriceParams,
+} from './declarativeChase';
+import { auditLogger, logChaseAttempt as logChaseAttemptAudit } from '../auditLogger';
 
 /**
  * Chase configuration for order chasing behavior.
  */
 export interface ChaseConfig {
-  /** Step size for price adjustments (in dollars, e.g., 0.05 for 5 cents) */
-  stepSize: number;
+  /** Step size for price adjustments (in dollars, e.g., 0.05 for 5 cents) - deprecated, use strategy instead */
+  stepSize?: number;
   /** Interval between chase attempts in milliseconds */
   stepIntervalMs: number;
   /** Maximum number of chase attempts */
   maxSteps: number;
   /** Maximum slippage allowed (in dollars from initial price) */
   maxSlippage: number;
-  /** Direction to chase: 'up' to increase limit, 'down' to decrease limit */
-  direction: 'up' | 'down';
+  /** Direction to chase: 'up' to increase limit, 'down' to decrease limit - deprecated, use strategy instead */
+  direction?: 'up' | 'down';
   /** Initial limit price */
   initialPrice: number;
+  /** Chase strategy to use (default: 'aggressive-linear') */
+  strategy?: string | ChaseStrategy;
+  /** Market data for strategy computation (bid, ask, mid) */
+  marketData?: {
+    bid: number;
+    ask: number;
+    mid: number;
+    spread?: number;
+  };
+  /** Underlying symbol */
+  underlying?: string;
+  /** Greeks data (optional) */
+  greeks?: {
+    delta?: number;
+    gamma?: number;
+    theta?: number;
+  };
 }
 
 /**
@@ -201,7 +228,7 @@ export async function chaseOrder(
   entryConfig: EntryConfigWithChase
 ): Promise<ChaseFillResult | ChaseAbortResult> {
   const { chase, accountId } = entryConfig;
-  const { stepSize, stepIntervalMs, maxSteps, maxSlippage, direction, initialPrice } = chase;
+  const { stepIntervalMs, maxSteps, maxSlippage, initialPrice, strategy, marketData, underlying, greeks } = chase;
 
   // Validate order
   if (order.status !== 'WORKING' && order.status !== 'PENDING') {
@@ -228,6 +255,27 @@ export async function chaseOrder(
     throw new Error('Order must have a valid netPrice to chase');
   }
 
+  // Resolve chase strategy
+  let chaseStrategy: ChaseStrategy;
+  if (typeof strategy === 'string') {
+    const resolved = getChaseStrategy(strategy);
+    if (!resolved) {
+      throw new Error(`Unknown chase strategy: ${strategy}`);
+    }
+    chaseStrategy = resolved;
+  } else if (strategy) {
+    chaseStrategy = strategy;
+  } else {
+    // Default to aggressive linear for backward compatibility
+    chaseStrategy = AGGRESSIVE_LINEAR;
+  }
+
+  // Get market data (use provided or fall back to order price estimates)
+  const bid = marketData?.bid || (marketData?.mid ? marketData.mid - 0.05 : order.netPrice - 0.05);
+  const ask = marketData?.ask || (marketData?.mid ? marketData.mid + 0.05 : order.netPrice + 0.05);
+  const mid = marketData?.mid || (bid + ask) / 2;
+  const spread = marketData?.spread || (ask - bid);
+
   // Initialize tracking variables
   let currentPrice = order.netPrice;
   let attemptNumber = 0;
@@ -245,12 +293,25 @@ export async function chaseOrder(
     // Calculate elapsed time
     const elapsedMs = Date.now() - startTime;
 
-    // Calculate next price adjustment
-    const priceAdjustment = direction === 'up' ? stepSize : -stepSize;
-    const nextPrice = currentPrice + priceAdjustment;
+    // Calculate next price using declarative strategy
+    const chaseParams: ChasePriceParams = {
+      mid,
+      bid,
+      ask,
+      attempt: attemptNumber + 1,
+      elapsedMs,
+      underlying: underlying || 'SPX',
+      initialPrice,
+      spread,
+      greeks,
+    };
 
-    // Check slippage limit
-    const slippage = Math.abs(nextPrice - initialPrice);
+    const computedPrice = chaseStrategy.computePrice(chaseParams);
+    
+    // Validate against slippage limit
+    const validatedPrice = validateChasePrice(computedPrice, initialPrice, maxSlippage);
+    const slippage = computeSlippage(initialPrice, validatedPrice);
+
     if (slippage > maxSlippage) {
       const abortResult: ChaseAbortResult = {
         orderId: order.id,
@@ -265,6 +326,8 @@ export async function chaseOrder(
       return abortResult;
     }
 
+    const nextPrice = validatedPrice;
+
     // Wait for step interval (except on first attempt)
     // Sleep before making the attempt, not after
     if (attemptNumber > 0) {
@@ -278,7 +341,25 @@ export async function chaseOrder(
     const updatedElapsedMs = Date.now() - startTime;
 
     // Update current price
+    const priceAdjustment = nextPrice - currentPrice;
     currentPrice = nextPrice;
+
+    // Log chase decision with audit trail
+    logChaseAttemptAudit(
+      order.metadata?.tradeId || order.id,
+      order.id,
+      attemptNumber,
+      updatedElapsedMs,
+      chaseStrategy.name,
+      {
+        mid,
+        bid,
+        ask,
+        initial_price: initialPrice,
+        underlying: underlying || 'SPX',
+      },
+      currentPrice
+    );
 
     // Emit attempt event
     const attempt: ChaseAttempt = {
@@ -289,6 +370,7 @@ export async function chaseOrder(
       priceAdjustment,
     };
     chaseEngine.emit('attempt', attempt);
+    logChaseAttempt(order.id, attemptNumber, currentPrice);
 
     try {
       // Issue cancel-replace via replaceOrder
@@ -314,6 +396,16 @@ export async function chaseOrder(
           finalPrice: currentPrice,
           order: updatedOrder,
         };
+        
+        // Log chase completion with audit trail
+        auditLogger.logChaseComplete({
+          trade_id: order.metadata?.tradeId || order.id,
+          order_id: order.id,
+          total_attempts: attemptNumber,
+          final_price: currentPrice,
+          success: true,
+        });
+        
         chaseEngine.emit('fill', fillResult);
         return fillResult;
       }
@@ -329,6 +421,17 @@ export async function chaseOrder(
           orderStatus: updatedOrder.status,
           error: updatedOrder.error || 'Order was rejected',
         };
+        
+        // Log chase completion with audit trail
+        auditLogger.logChaseComplete({
+          trade_id: order.metadata?.tradeId || order.id,
+          order_id: order.id,
+          total_attempts: attemptNumber,
+          final_price: currentPrice,
+          success: false,
+          reason: 'rejected',
+        });
+        
         chaseEngine.emit('abort', abortResult);
         return abortResult;
       }
@@ -343,6 +446,17 @@ export async function chaseOrder(
           finalPrice: currentPrice,
           orderStatus: updatedOrder.status,
         };
+        
+        // Log chase completion with audit trail
+        auditLogger.logChaseComplete({
+          trade_id: order.metadata?.tradeId || order.id,
+          order_id: order.id,
+          total_attempts: attemptNumber,
+          final_price: currentPrice,
+          success: false,
+          reason: 'cancelled',
+        });
+        
         chaseEngine.emit('abort', abortResult);
         return abortResult;
       }
@@ -363,6 +477,18 @@ export async function chaseOrder(
         orderStatus: lastOrderStatus,
         error: `Replace order failed: ${errorMessage}`,
       };
+      
+      // Log chase completion with audit trail
+      auditLogger.logChaseComplete({
+        trade_id: order.metadata?.tradeId || order.id,
+        order_id: order.id,
+        total_attempts: attemptNumber,
+        final_price: currentPrice,
+        success: false,
+        reason: 'rejected',
+        error: errorMessage,
+      });
+      
       chaseEngine.emit('abort', abortResult);
       return abortResult;
     }
@@ -378,6 +504,17 @@ export async function chaseOrder(
     orderStatus: lastOrderStatus,
     error: `Max chase steps (${maxSteps}) reached`,
   };
+  
+  // Log chase completion with audit trail
+  auditLogger.logChaseComplete({
+    trade_id: order.metadata?.tradeId || order.id,
+    order_id: order.id,
+    total_attempts: attemptNumber,
+    final_price: currentPrice,
+    success: false,
+    reason: 'max_steps',
+  });
+  
   chaseEngine.emit('abort', abortResult);
   return abortResult;
 }

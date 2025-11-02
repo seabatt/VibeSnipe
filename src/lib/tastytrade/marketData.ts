@@ -8,6 +8,8 @@
 import { EventEmitter } from 'events';
 import { getClient } from './client';
 import type { GreekQuote } from './types';
+import { logger } from '../logger';
+import { ConnectionError } from '../errors';
 
 /**
  * Event emitter for quote updates.
@@ -87,9 +89,11 @@ export async function connect(): Promise<void> {
     quoteStreamer.connect();
     
     isConnected = true;
+    logger.info('Quote streamer connected');
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    throw new Error(`Failed to connect to quote streamer: ${errorMessage}`);
+    logger.error('Failed to connect to quote streamer', undefined, error as Error);
+    throw new ConnectionError(`Failed to connect to quote streamer: ${errorMessage}`, 'quote-streamer');
   }
 }
 
@@ -160,7 +164,7 @@ function handleQuoteUpdate(rawQuote: any): void {
     // Emit the normalized quote
     quoteEmitter.emit('quote', normalizedQuote);
   } catch (error) {
-    console.error('Error normalizing quote update:', error);
+    logger.error('Error normalizing quote update', undefined, error as Error);
     quoteEmitter.emit('error', error);
   }
 }
@@ -171,14 +175,15 @@ function handleQuoteUpdate(rawQuote: any): void {
  * @param {Error} error - Error from the streamer
  */
 function handleError(error: Error): void {
-  console.error('Quote streamer error:', error);
+  logger.error('Quote streamer error', undefined, error);
   quoteEmitter.emit('error', error);
   
   // Attempt reconnection if connection was lost
   if (isConnected) {
     isConnected = false;
+    logger.info('Attempting to reconnect quote streamer in 5s');
     setTimeout(() => {
-      connect().catch(console.error);
+      connect().catch(err => logger.error('Reconnection failed', undefined, err));
     }, 5000);
   }
 }
@@ -225,9 +230,12 @@ export async function subscribeQuotes(symbols: string[]): Promise<void> {
       // Add to subscribed set
       subscribedSymbols.add(symbol);
     });
+    
+    logger.info('Subscribed to quotes', { symbols: newSymbols });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    throw new Error(`Failed to subscribe to quotes: ${errorMessage}`);
+    logger.error('Failed to subscribe to quotes', { symbols: newSymbols }, error as Error);
+    throw new ConnectionError(`Failed to subscribe to quotes: ${errorMessage}`, 'quote-subscription');
   }
 }
 
@@ -259,9 +267,10 @@ export async function unsubscribeQuotes(): Promise<void> {
     subscribedSymbols.clear();
     isConnected = false;
     quoteStreamer = null;
+    logger.info('Unsubscribed from all quotes');
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error(`Error unsubscribing from quotes: ${errorMessage}`);
+    logger.error('Error unsubscribing from quotes', undefined, error as Error);
   }
 }
 

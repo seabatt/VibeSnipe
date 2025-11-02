@@ -14,6 +14,8 @@ import type {
   VerticalSpec,
   VerticalLegs,
 } from './types';
+import { logger } from '../logger';
+import { ChainFetchError, StrikeNotFoundError } from '../errors';
 
 /**
  * Fetches the option chain for a given symbol and expiration date.
@@ -125,11 +127,15 @@ export async function fetchOptionChain(
       }
     }
 
+    logger.info('Option chain fetched', { symbol, expiration, count: contracts.length });
     return contracts;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    throw new Error(
-      `Failed to fetch option chain for ${symbol} exp ${expiration}: ${errorMessage}`
+    logger.error('Failed to fetch option chain', { symbol, expiration }, error as Error);
+    throw new ChainFetchError(
+      `Failed to fetch option chain for ${symbol} exp ${expiration}: ${errorMessage}`,
+      symbol,
+      expiration
     );
   }
 }
