@@ -18,7 +18,9 @@ function generateSignalId(): string {
  * Create a new signal.
  */
 export function createSignal(params: {
+  signal_id?: string;
   source: 'discord' | 'manual' | 'scheduled';
+  timestamp?: string;
   underlying: string;
   strategy_type: string;
   direction: 'CALL' | 'PUT';
@@ -26,9 +28,9 @@ export function createSignal(params: {
   metadata?: Record<string, any>;
 }): SignalRecord {
   const record: SignalRecord = {
-    signal_id: generateSignalId(),
+    signal_id: params.signal_id || generateSignalId(),
     source: params.source,
-    timestamp: new Date().toISOString(),
+    timestamp: params.timestamp || new Date().toISOString(),
     underlying: params.underlying,
     strategy_type: params.strategy_type,
     direction: params.direction,

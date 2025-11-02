@@ -117,7 +117,7 @@ export function evaluateRules(
       if (rule.action === 'block_trade') {
         return {
           passed: false,
-          triggered_rules,
+          triggered_rules: triggeredRules,
           actions,
           blocking_reason: result.reason,
         };
@@ -128,7 +128,7 @@ export function evaluateRules(
   // All rules passed
   return {
     passed: triggeredRules.length === 0,
-    triggered_rules,
+    triggered_rules: triggeredRules,
     actions,
   };
 }

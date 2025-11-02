@@ -7,7 +7,7 @@
  */
 
 import { logger } from './logger';
-import type { TradeState } from './tradeStateMachine';
+import { TradeState } from './tradeStateMachine';
 
 /**
  * Trade lifecycle log entry.
@@ -173,6 +173,13 @@ class AuditLogger {
    */
   logOrderFill(entry: FillConfirmationLogEntry): void {
     logger.info('Order filled', entry as any);
+  }
+
+  /**
+   * Log fill event (simplified).
+   */
+  logFill(entry: TradeLogEntry): void {
+    logger.info('Fill event', entry as any);
   }
 
   /**

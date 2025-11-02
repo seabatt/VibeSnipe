@@ -11,7 +11,7 @@
 import { db } from '../db/client';
 import { createTrade, updateTrade } from '../db/services/tradeService';
 import { auditLogger } from '../auditLogger';
-import { onTransition, type TradeState, type Trade, type StateTransitionEvent } from '../tradeStateMachine';
+import { onTransition, TradeState, type Trade, type StateTransitionEvent } from '../tradeStateMachine';
 import { logger } from '../logger';
 
 /**
@@ -144,8 +144,9 @@ class StateMonitor {
     auditLogger.logFill({
       timestamp: new Date().toISOString(),
       trade_id: tradeId,
-      state: 'FILLED',
+      state: TradeState.FILLED,
       action: 'fill_confirmed',
+      reason: 'Order filled',
       price: fillPrice,
       order_id: orderId,
       metadata: {

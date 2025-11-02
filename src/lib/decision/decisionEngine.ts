@@ -110,7 +110,7 @@ export async function makeDecision(context: DecisionContext): Promise<Decision> 
     signal_id: signal.signal_id,
     should_trade: true,
     reason: 'All checks passed',
-    trade_spec,
+    trade_spec: tradeSpec,
     decision_time,
     strategy_version,
   };

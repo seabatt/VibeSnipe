@@ -485,8 +485,7 @@ export async function chaseOrder(
         total_attempts: attemptNumber,
         final_price: currentPrice,
         success: false,
-        reason: 'rejected',
-        error: errorMessage,
+        reason: errorMessage,
       });
       
       chaseEngine.emit('abort', abortResult);
