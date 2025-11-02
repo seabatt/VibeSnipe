@@ -9,7 +9,6 @@
  */
 
 import { buildTradeIntent as buildIntent, type TradeIntent } from '../tradeIntent';
-import { createTradeIntent as createIntentRecord } from '../db/services/tradeService';
 import { marketStateCache } from '../market/marketStateCache';
 import { validateDelta } from '../market/greeksValidator';
 import { fetchAndBuildVertical } from '../tastytrade/chains';
@@ -139,9 +138,7 @@ export async function buildTradeFromSpec(
     },
   };
 
-  // Note: We're using createTradeService but the actual record creation
-  // should happen in the orchestrator when the trade is created
-  // For now, we just log the intent
+  // Log the intent (record creation happens in orchestrator)
   logger.info('Trade intent built', {
     intent_id: intent.id,
     decision_id,
