@@ -1100,11 +1100,15 @@ export function Settings() {
                       <FormField label="Underlying">
                         <Select
                           value={editingBlock.underlying}
-                          onChange={(v) => updateBlock(editingBlock.id, { underlying: v })}
+                          onChange={(v) => updateBlock(editingBlock.id, { underlying: v as Underlying })}
                           options={[
                             { value: 'SPX', label: 'SPX' },
-                            { value: 'SPY', label: 'SPY' },
                             { value: 'QQQ', label: 'QQQ' },
+                            { value: 'NDX', label: 'NDX' },
+                            { value: 'AAPL', label: 'AAPL' },
+                            { value: 'TSLA', label: 'TSLA' },
+                            { value: 'SPY', label: 'SPY' },
+                            { value: 'RUT', label: 'RUT' },
                           ]}
                         />
                       </FormField>

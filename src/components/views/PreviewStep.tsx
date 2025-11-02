@@ -1000,7 +1000,7 @@ export function PreviewStep({
               <div style={{
                 padding: `${tokens.space.xs}px ${tokens.space.sm}px`,
                 backgroundColor: colors.bg,
-                borderRadius: `${tokens.radius.xs}px`,
+                borderRadius: `${tokens.radius.sm}px`,
                 textAlign: 'center',
               }}>
                 <div style={{
@@ -1020,7 +1020,7 @@ export function PreviewStep({
               <div style={{
                 padding: `${tokens.space.xs}px ${tokens.space.sm}px`,
                 backgroundColor: colors.bg,
-                borderRadius: `${tokens.radius.xs}px`,
+                borderRadius: `${tokens.radius.sm}px`,
                 textAlign: 'center',
               }}>
                 <div style={{

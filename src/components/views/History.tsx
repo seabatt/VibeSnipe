@@ -10,14 +10,14 @@ import { useOrders } from '@/stores/useOrders';
 import { Position, OrderState } from '@/types';
 
 type DateRange = 'today' | 'week' | 'month' | 'custom';
-type UnderlyingFilter = 'ALL' | 'SPX' | 'QQQ';
+type UnderlyingFilter = 'ALL' | 'SPX' | 'QQQ' | 'NDX' | 'AAPL' | 'TSLA' | 'SPY' | 'RUT';
 type StrategyFilter = 'ALL' | 'Vertical' | 'Butterfly';
 
 interface TradeHistory {
   id: string;
   date: string;
   time: string;
-  underlying: 'SPX' | 'QQQ';
+  underlying: 'SPX' | 'QQQ' | 'NDX' | 'AAPL' | 'TSLA' | 'SPY' | 'RUT';
   strategy: string;
   entry: number;
   exit: number;
