@@ -261,9 +261,14 @@ export function Positions() {
               </p>
             </div>
           ) : (
-            <p className="text-text-secondary-dark dark:text-text-secondary-dark text-xs mb-4">
-              {error}
-            </p>
+            <div className="space-y-2">
+              <p className="text-text-secondary-dark dark:text-text-secondary-dark text-xs mb-4">
+                {error}
+              </p>
+              <p className="text-text-secondary-dark dark:text-text-secondary-dark text-xs opacity-75">
+                Check the browser console (F12) for more details, or check Vercel logs for server-side errors.
+              </p>
+            </div>
           )}
           
           <button
