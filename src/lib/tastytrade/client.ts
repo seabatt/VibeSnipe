@@ -46,11 +46,68 @@ async function exchangeRefreshToken(
   // - client_secret: the client secret
   // - client_id: optional but recommended
   // 
-  // OAuth2 RFC allows two authentication methods:
-  // 1. Basic auth with client_id:client_secret (preferred when client_id available)
-  // 2. Body params with client_id and client_secret
-  // We'll try Basic auth first if client_id is available, fallback to body params
+  // Try different authentication methods in order:
+  // 1. Basic auth header only (OAuth2 RFC preferred method)
+  // 2. Body params only (fallback if Basic auth fails)
   
+  // Method 1: Try Basic auth header only (no client_id/client_secret in body)
+  if (clientId) {
+    const headers: HeadersInit = {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Authorization': `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
+    };
+    
+    const bodyParams: Record<string, string> = {
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+    };
+    
+    logger.info('OAuth2 token exchange attempt: Basic auth only', {
+      url: `${baseUrl}/oauth/token`,
+      method: 'basic_auth_header',
+      bodyParams: Object.keys(bodyParams),
+      env
+    });
+    
+    try {
+      const response = await fetch(`${baseUrl}/oauth/token`, {
+        method: 'POST',
+        headers,
+        body: new URLSearchParams(bodyParams),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        
+        if (!data.access_token) {
+          logger.error('OAuth2 response missing access_token', { response: data });
+          throw new Error('OAuth2 token exchange returned no access token');
+        }
+        
+        logger.info('OAuth2 token exchange successful (Basic auth only)', { env });
+        return data.access_token;
+      } else {
+        const errorText = await response.text();
+        logger.warn('OAuth2 token exchange failed with Basic auth', {
+          status: response.status,
+          statusText: response.statusText,
+          method: 'basic_auth_header',
+          willTryFallback: true
+        });
+        
+        // Fall through to try body params method
+      }
+    } catch (error) {
+      logger.warn('OAuth2 token exchange error with Basic auth', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        method: 'basic_auth_header',
+        willTryFallback: true
+      });
+      // Fall through to try body params method
+    }
+  }
+  
+  // Method 2: Fallback to body params only (no Basic auth header)
   const headers: HeadersInit = {
     'Content-Type': 'application/x-www-form-urlencoded',
   };
@@ -60,30 +117,25 @@ async function exchangeRefreshToken(
     refresh_token: refreshToken,
   };
   
-  // Tastytrade OAuth2 might require client_id in body even with Basic auth
-  // Try both approaches for maximum compatibility
   if (clientId) {
-    // Include client_id in body (some OAuth2 servers require it)
     bodyParams.client_id = clientId;
-    // Also use Basic auth for client authentication
-    const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
-    headers['Authorization'] = `Basic ${credentials}`;
-    // Note: Some servers require client_secret in body, others don't
-    // We'll include it for compatibility
     bodyParams.client_secret = clientSecret;
+    logger.info('OAuth2 token exchange attempt: Body params only', {
+      url: `${baseUrl}/oauth/token`,
+      method: 'body_params',
+      bodyParams: Object.keys(bodyParams),
+      env
+    });
   } else {
-    // Fallback: include client_secret in body when client_id is not available
+    // No client_id available, use client_secret only
     bodyParams.client_secret = clientSecret;
+    logger.info('OAuth2 token exchange attempt: Body params (client_secret only)', {
+      url: `${baseUrl}/oauth/token`,
+      method: 'body_params',
+      bodyParams: Object.keys(bodyParams),
+      env
+    });
   }
-  
-  // Log request details for debugging (don't log sensitive values)
-  logger.info('OAuth2 token exchange request', {
-    url: `${baseUrl}/oauth/token`,
-    hasClientId: !!clientId,
-    hasBasicAuth: !!headers['Authorization'],
-    bodyParams: Object.keys(bodyParams),
-    env
-  });
   
   const response = await fetch(`${baseUrl}/oauth/token`, {
     method: 'POST',
@@ -93,14 +145,6 @@ async function exchangeRefreshToken(
 
   if (!response.ok) {
     const errorText = await response.text();
-    logger.error('OAuth2 token exchange failed', {
-      status: response.status,
-      statusText: response.statusText,
-      error: errorText,
-      url: `${baseUrl}/oauth/token`,
-      hasClientId: !!clientId,
-      hasBasicAuth: !!headers['Authorization']
-    });
     
     // Try to parse error as JSON if possible
     let errorDetails = errorText;
@@ -110,6 +154,15 @@ async function exchangeRefreshToken(
     } catch {
       // Not JSON, use as-is
     }
+    
+    logger.error('OAuth2 token exchange failed (all methods exhausted)', {
+      status: response.status,
+      statusText: response.statusText,
+      error: errorDetails,
+      url: `${baseUrl}/oauth/token`,
+      triedMethods: clientId ? ['basic_auth_header', 'body_params'] : ['body_params'],
+      env
+    });
     
     throw new Error(`OAuth2 token exchange failed: ${response.status} ${response.statusText} - ${errorDetails}`);
   }
@@ -121,7 +174,10 @@ async function exchangeRefreshToken(
     throw new Error('OAuth2 token exchange returned no access token');
   }
   
-  logger.info('OAuth2 token exchange successful');
+  logger.info('OAuth2 token exchange successful (body params method)', { 
+    method: clientId ? 'body_params' : 'body_params_client_secret_only',
+    env 
+  });
   return data.access_token;
 }
 
