@@ -124,8 +124,18 @@ export async function GET() {
       });
       
       // Extract positions from response
-      // Response structure: { data: { items: [...] } } or { data: [...] }
-      positions = response?.data?.items || response?.data || response?.items || [];
+      // Response structure can be:
+      // 1. Array directly: [...]
+      // 2. { data: { items: [...] } }
+      // 3. { data: [...] }
+      // 4. { items: [...] }
+      if (Array.isArray(response)) {
+        // Response is an array directly
+        positions = response;
+      } else {
+        // Response is an object, try various extraction paths
+        positions = response?.data?.items || response?.data || response?.items || [];
+      }
       
       logger.info('Positions extracted from response', {
         accountNumber,
