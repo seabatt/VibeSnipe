@@ -22,14 +22,58 @@ type TastytradeSDK = InstanceType<typeof TastytradeClient>;
 let clientInstance: TastytradeSDK | null = null;
 
 /**
+ * Exchanges a refresh token for an access token using OAuth2.
+ * 
+ * @param refreshToken - OAuth2 refresh token
+ * @param clientSecret - OAuth2 client secret
+ * @param env - Environment ('prod' or 'sandbox')
+ * @returns Promise<string> - Access token
+ */
+async function exchangeRefreshToken(
+  refreshToken: string,
+  clientSecret: string,
+  env: 'prod' | 'sandbox'
+): Promise<string> {
+  const baseUrl = env === 'prod' 
+    ? 'https://api.tastytrade.com' 
+    : 'https://api.cert.tastytrade.com';
+  
+  const response = await fetch(`${baseUrl}/oauth/token`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      client_id: '', // Not needed for refresh token flow
+      client_secret: clientSecret,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`OAuth2 token exchange failed: ${response.status} ${response.statusText} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  return data.access_token;
+}
+
+/**
  * Gets or initializes an authenticated Tastytrade SDK client.
  * 
- * Uses OAuth2 authentication with credentials from environment variables:
- * - TASTYTRADE_ENV: 'prod' or 'sandbox'
- * - TASTYTRADE_CLIENT_SECRET: OAuth client secret
- * - TASTYTRADE_REFRESH_TOKEN: OAuth refresh token
+ * Supports OAuth2 (preferred) or username/password (legacy) authentication.
  * 
- * The SDK handles automatic token refresh internally.
+ * OAuth2 credentials (environment variables):
+ * - TASTYTRADE_ENV: 'prod' or 'sandbox'
+ * - TASTYTRADE_CLIENT_SECRET: OAuth2 client secret
+ * - TASTYTRADE_REFRESH_TOKEN: OAuth2 refresh token
+ * 
+ * Legacy username/password credentials:
+ * - TASTYTRADE_ENV: 'prod' or 'sandbox'
+ * - TASTYTRADE_USERNAME: Tastytrade username
+ * - TASTYTRADE_PASSWORD: Tastytrade password
  * 
  * @returns {Promise<TastytradeSDK>} Authenticated SDK client instance
  * @throws {Error} If required environment variables are missing or client initialization fails
@@ -37,7 +81,7 @@ let clientInstance: TastytradeSDK | null = null;
  * @example
  * ```ts
  * const client = await getClient();
- * const account = await client.accounts.list();
+ * const accounts = await client.accountsAndCustomersService.getCustomerAccounts();
  * ```
  */
 export async function getClient(): Promise<TastytradeSDK> {
@@ -48,46 +92,50 @@ export async function getClient(): Promise<TastytradeSDK> {
 
   // Validate required environment variables
   const config = getTastytradeConfig();
-  const { env, clientSecret, refreshToken } = config;
 
   try {
     // Determine base URLs based on environment
-    const baseUrl = env === 'prod' 
+    const baseUrl = config.env === 'prod' 
       ? 'https://api.tastytrade.com' 
       : 'https://api.cert.tastytrade.com';
     
-    const accountStreamerUrl = env === 'prod'
+    const accountStreamerUrl = config.env === 'prod'
       ? 'wss://streamer.tastytrade.com'
       : 'wss://streamer.cert.tastytrade.com';
 
     // Initialize client with base URL and account streamer URL
     clientInstance = new TastytradeClient(baseUrl, accountStreamerUrl);
-    
-    // OAuth2 authentication for the SDK
-    // The SDK's httpClient may handle OAuth via headers or token management
-    // For OAuth2 with refresh tokens, we may need to set authorization headers manually
-    // or use the httpClient's authentication methods
-    // Check if httpClient has setAuthToken or similar methods
-    const httpClient = (clientInstance as any).httpClient;
-    if (httpClient && typeof httpClient.setAuthToken === 'function') {
-      // If SDK supports setting auth token directly
-      httpClient.setAuthToken(refreshToken);
+
+    // Authenticate based on method
+    if (config.authMethod === 'oauth2') {
+      // OAuth2 authentication: exchange refresh token for access token
+      const accessToken = await exchangeRefreshToken(
+        config.refreshToken,
+        config.clientSecret,
+        config.env
+      );
+      
+      // Set the access token in the session
+      // Note: The HTTP client uses authToken directly in Authorization header,
+      // so we need to include "Bearer" prefix
+      clientInstance.session.authToken = `Bearer ${accessToken}`;
+      
+      logger.info('Tastytrade client initialized and authenticated via OAuth2', { 
+        env: config.env 
+      });
     } else {
-      // Otherwise, OAuth2 may be handled via API calls to get access token
-      // For now, storing credentials for later use - actual token exchange may happen on first API call
-      // The SDK might handle this automatically via httpClient interceptors
-      (clientInstance as any)._oauthConfig = {
-        clientSecret,
-        refreshToken,
-        scopes: ['read', 'trade'],
-      };
+      // Legacy username/password authentication
+      await clientInstance.sessionService.login(config.username, config.password);
+      
+      logger.info('Tastytrade client initialized and authenticated via username/password', { 
+        env: config.env 
+      });
     }
 
-    logger.info('Tastytrade client initialized', { env });
     return clientInstance;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    logger.error('Failed to initialize Tastytrade client', { env }, error as Error);
+    logger.error('Failed to initialize Tastytrade client', { env: config.env }, error as Error);
     throw new AuthenticationError(`Failed to initialize Tastytrade client: ${errorMessage}`);
   }
 }
@@ -133,9 +181,19 @@ export function getEnv(): TastytradeEnv | null {
  */
 export async function getAccount(): Promise<{ accountNumber: string; accountType?: string }> {
   try {
-    const client = await getClient();
+    const config = getTastytradeConfig();
     
-    // Fetch customer accounts via SDK
+    // If TASTYTRADE_ACCOUNT_NUMBER is set, use it directly
+    if (config.accountNumber) {
+      logger.info('Using configured account number', { accountNumber: config.accountNumber });
+      return {
+        accountNumber: config.accountNumber,
+        accountType: 'configured',
+      };
+    }
+    
+    // Otherwise, fetch accounts via SDK and use first one
+    const client = await getClient();
     const response = await client.accountsAndCustomersService.getCustomerAccounts();
     
     // Extract first account from response

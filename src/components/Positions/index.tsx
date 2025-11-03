@@ -238,14 +238,15 @@ export function Positions() {
               </p>
               <div className="text-left bg-surface dark:bg-surface border border-border-dark dark:border-border-dark rounded-8 p-3 text-xs space-y-1 font-mono">
                 <div className="text-text-primary-dark dark:text-text-primary-dark">
-                  <span className="text-text-secondary-dark dark:text-text-secondary-dark">Required:</span>
+                  <span className="text-text-secondary-dark dark:text-text-secondary-dark">Required (OAuth2):</span>
                   <div className="mt-2 ml-2 space-y-1">
                     <div>TASTYTRADE_ENV=prod</div>
-                    <div>TASTYTRADE_USERNAME=your_username</div>
-                    <div>TASTYTRADE_PASSWORD=your_password</div>
+                    <div>TASTYTRADE_CLIENT_SECRET=your_client_secret</div>
+                    <div>TASTYTRADE_REFRESH_TOKEN=your_refresh_token</div>
                   </div>
                   <span className="text-text-secondary-dark dark:text-text-secondary-dark block mt-2">Optional:</span>
                   <div className="mt-2 ml-2">
+                    <div>TASTYTRADE_CLIENT_ID=your_client_id</div>
                     <div>TASTYTRADE_ACCOUNT_NUMBER=5WZ54420</div>
                   </div>
                 </div>
