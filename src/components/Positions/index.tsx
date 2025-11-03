@@ -1,40 +1,30 @@
 'use client';
 
-import { useOrders } from '@/stores/useOrders';
+import { useEffect, useState } from 'react';
 import { Position } from '@/types';
 import { RiskGraph } from '../RiskGraph';
 
 function PositionTile({ position }: { position: Position }) {
-  const { updatePosition, removePosition } = useOrders();
   const pnlPercent = position.avgPrice > 0 ? (position.pnl / (position.avgPrice * position.qty * 100)) * 100 : 0;
 
   const handleClose = () => {
-    // Close position at mid price
-    updatePosition(position.id, { state: 'CLOSED' });
-    setTimeout(() => removePosition(position.id), 100);
+    // TODO: Implement position closing via API
+    console.log('Close position:', position.id);
   };
 
   const handleChangeTarget = () => {
     const newTp = prompt('New Take Profit %:', position.ruleBundle.takeProfitPct.toString());
     if (newTp) {
-      updatePosition(position.id, {
-        ruleBundle: {
-          ...position.ruleBundle,
-          takeProfitPct: parseInt(newTp) || position.ruleBundle.takeProfitPct,
-        },
-      });
+      // TODO: Implement target update via API
+      console.log('Update target:', position.id, newTp);
     }
   };
 
   const handleChangeStop = () => {
     const newSl = prompt('New Stop Loss %:', position.ruleBundle.stopLossPct.toString());
     if (newSl) {
-      updatePosition(position.id, {
-        ruleBundle: {
-          ...position.ruleBundle,
-          stopLossPct: parseInt(newSl) || position.ruleBundle.stopLossPct,
-        },
-      });
+      // TODO: Implement stop update via API
+      console.log('Update stop:', position.id, newSl);
     }
   };
 
@@ -177,7 +167,69 @@ function PositionTile({ position }: { position: Position }) {
 }
 
 export function Positions() {
-  const { positions } = useOrders();
+  const [positions, setPositions] = useState<Position[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchPositions();
+    
+    // Refresh positions every 30 seconds
+    const interval = setInterval(fetchPositions, 30000);
+    
+    return () => clearInterval(interval);
+  }, []);
+
+  const fetchPositions = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const response = await fetch('/api/tastytrade/positions');
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch positions: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      setPositions(data.positions || []);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      setError(errorMessage);
+      console.error('Failed to fetch positions:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading && positions.length === 0) {
+    return (
+      <div className="h-full flex items-center justify-center bg-surface-dark dark:bg-surface-dark border border-border-dark dark:border-border-dark rounded-16">
+        <p className="text-text-secondary-dark dark:text-text-secondary-dark text-sm">
+          Loading positions...
+        </p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="h-full flex items-center justify-center bg-surface-dark dark:bg-surface-dark border border-border-dark dark:border-border-dark rounded-16">
+        <div className="text-center">
+          <p className="text-risk text-sm mb-4">Failed to load positions</p>
+          <p className="text-text-secondary-dark dark:text-text-secondary-dark text-xs mb-4">
+            {error}
+          </p>
+          <button
+            onClick={fetchPositions}
+            className="px-4 py-2 bg-surface dark:bg-surface border border-border-dark dark:border-border-dark text-text-primary-dark dark:text-text-primary-dark text-xs rounded-12 hover:bg-border-dark dark:hover:bg-border-dark transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (positions.length === 0) {
     return (
@@ -195,6 +247,13 @@ export function Positions() {
         <h2 className="text-sm font-medium text-text-primary-dark dark:text-text-primary-dark">
           Positions ({positions.length})
         </h2>
+        <button
+          onClick={fetchPositions}
+          disabled={loading}
+          className="text-xs text-text-secondary-dark dark:text-text-secondary-dark hover:text-text-primary-dark dark:hover:text-text-primary-dark transition-colors disabled:opacity-50"
+        >
+          {loading ? 'Refreshing...' : 'Refresh'}
+        </button>
       </div>
       <div className="space-y-12 max-h-[600px] overflow-y-auto">
         {positions.map((position) => (
