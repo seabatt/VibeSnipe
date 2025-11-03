@@ -77,7 +77,7 @@ export async function GET() {
     });
     
     // If Basic auth fails, try body params method
-    if (!response.ok && config.clientId) {
+    if (!response.ok && clientId) {
       logger.info('Basic auth method failed, trying body params method');
       authMethod = 'body_params';
       
@@ -85,6 +85,7 @@ export async function GET() {
         'Content-Type': 'application/x-www-form-urlencoded',
       };
       
+      // clientId is guaranteed to be string here because of the if condition above
       bodyParams.client_id = clientId;
       bodyParams.client_secret = clientSecret;
       
