@@ -120,8 +120,8 @@ export async function getClient(): Promise<TastytradeSDK> {
       );
       
       // Set the access token in the session
-      // Note: The HTTP client uses authToken directly in Authorization header,
-      // so we need to include "Bearer" prefix
+      // Note: The HTTP client uses authToken directly in Authorization header
+      // Tastytrade OAuth2 requires "Bearer" prefix for access tokens
       clientInstance.session.authToken = `Bearer ${accessToken}`;
       
       logger.info('Tastytrade client initialized and authenticated via OAuth2', { 

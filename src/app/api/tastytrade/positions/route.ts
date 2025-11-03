@@ -32,90 +32,27 @@ export async function GET() {
     const client = await getClient();
 
     // Fetch live positions for the account
-    // Using the accountsAndCustomersService to get positions
-    // Tasty Trade API pattern: GET /accounts/{account-number}/positions
-    const accountsService = client.accountsAndCustomersService;
+    // Use balancesAndPositionsService.getPositionsList() - this is the correct SDK method
+    const balancesAndPositionsService = client.balancesAndPositionsService;
     
-    // Try different method names that might exist in the SDK
-    const serviceMethods = Object.keys(accountsService);
-    logger.info('Available accountsAndCustomersService methods', { 
-      accountNumber,
-      methods: serviceMethods.filter(m => typeof (accountsService as any)[m] === 'function')
-    });
+    logger.info('Fetching positions', { accountNumber });
     
     let response: any;
     let positions: any[] = [];
     
     try {
-      // Try getLivePositions first (most common method name)
-      if (typeof (accountsService as any).getLivePositions === 'function') {
-        logger.info('Trying getLivePositions method');
-        response = await (accountsService as any).getLivePositions(accountNumber);
-        positions = response?.data?.items || response?.data || response?.items || [];
-      } 
-      // Try getPositions
-      else if (typeof (accountsService as any).getPositions === 'function') {
-        logger.info('Trying getPositions method');
-        response = await (accountsService as any).getPositions(accountNumber);
-        positions = response?.data?.items || response?.data || response?.items || [];
-      }
-      // Try getAccountPositions
-      else if (typeof (accountsService as any).getAccountPositions === 'function') {
-        logger.info('Trying getAccountPositions method');
-        response = await (accountsService as any).getAccountPositions(accountNumber);
-        positions = response?.data?.items || response?.data || response?.items || [];
-      }
-      // Try getAccountLivePositions
-      else if (typeof (accountsService as any).getAccountLivePositions === 'function') {
-        logger.info('Trying getAccountLivePositions method');
-        response = await (accountsService as any).getAccountLivePositions(accountNumber);
-        positions = response?.data?.items || response?.data || response?.items || [];
-      }
-      // Fallback: Use REST API directly
-      else {
-        logger.info('SDK methods not found, trying REST API directly');
-        const baseUrl = process.env.TASTYTRADE_ENV === 'prod' 
-          ? 'https://api.tastytrade.com' 
-          : 'https://api.cert.tastytrade.com';
-        
-        // Get the session token from the client - try different locations
-        const sessionToken = (client as any).sessionToken 
-          || (client as any).session?.sessionToken
-          || (client as any).sessionTokenValue;
-        
-        if (!sessionToken) {
-          logger.error('No session token available');
-          throw new Error('No session token available for API call');
-        }
-        
-        const apiUrl = `${baseUrl}/accounts/${accountNumber}/positions`;
-        logger.info('Fetching positions via REST API', { apiUrl });
-        
-        const authResponse = await fetch(apiUrl, {
-          headers: {
-            'Authorization': `Bearer ${sessionToken}`,
-            'Content-Type': 'application/json',
-          },
-        });
-        
-        if (!authResponse.ok) {
-          const errorText = await authResponse.text();
-          logger.error('REST API call failed', { 
-            status: authResponse.status, 
-            statusText: authResponse.statusText,
-            error: errorText.substring(0, 500)
-          });
-          throw new Error(`Failed to fetch positions: ${authResponse.status} ${authResponse.statusText}`);
-        }
-        
-        response = await authResponse.json();
-        positions = response?.data?.items || response?.data || response?.items || [];
-      }
+      // Use the correct SDK method: getPositionsList
+      response = await balancesAndPositionsService.getPositionsList(accountNumber);
+      
+      // Extract positions from response
+      // Response structure: { data: { items: [...] } } or { data: [...] }
+      positions = response?.data?.items || response?.data || response?.items || [];
       
       logger.info('Positions fetched successfully', { 
         accountNumber, 
         count: positions.length,
-        responseStructure: response ? Object.keys(response) : []
+        responseStructure: response ? Object.keys(response) : [],
+        samplePosition: positions.length > 0 ? Object.keys(positions[0]) : []
       });
     } catch (apiError) {
       logger.error('Error fetching positions from API', { 
