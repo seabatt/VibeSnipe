@@ -9,6 +9,7 @@ import { useOrders } from '@/stores/useOrders';
 import { useQuotes } from '@/stores/useQuotes';
 import { useSchedule } from '@/stores/useSchedule';
 import { Position, ScheduledBlock } from '@/types';
+import { Positions } from '@/components/Positions';
 
 export function Dashboard() {
   const [mounted, setMounted] = useState(false);
@@ -434,12 +435,17 @@ export function Dashboard() {
           </div>
 
           {/* Open Positions */}
-          <OpenPositions 
-            positions={openPositions}
-            isMobile={isMobile}
-            tokens={tokens}
-            colors={colors}
-          />
+          <div>
+            <h2 style={{ 
+              fontSize: `${tokens.type.sizes.lg}px`,
+              color: colors.textPrimary,
+              fontWeight: tokens.type.weights.medium,
+              marginBottom: `${tokens.space.lg}px`,
+            }}>
+              Open Positions
+            </h2>
+            <Positions />
+          </div>
         </div>
       </div>
     </div>
