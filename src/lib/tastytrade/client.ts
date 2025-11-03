@@ -35,6 +35,36 @@ async function exchangeRefreshToken(
   clientId: string | undefined,
   env: 'prod' | 'sandbox'
 ): Promise<string> {
+  // Validate credentials before attempting token exchange
+  const validateCredential = (name: string, value: string | undefined | null): void => {
+    if (!value || typeof value !== 'string' || value.trim().length === 0) {
+      const error = new Error(`Invalid ${name}: value is empty, null, or whitespace only`);
+      logger.error(`Credential validation failed: ${name}`, {
+        error: error.message,
+        valueLength: value?.length || 0,
+        isEmpty: !value,
+        isWhitespaceOnly: value ? value.trim().length === 0 : false
+      });
+      throw error;
+    }
+  };
+
+  // Validate required credentials
+  validateCredential('refreshToken', refreshToken);
+  validateCredential('clientSecret', clientSecret);
+  
+  // Validate optional clientId if provided
+  if (clientId !== undefined && clientId !== null) {
+    validateCredential('clientId', clientId);
+  }
+
+  // Validate env
+  if (env !== 'prod' && env !== 'sandbox') {
+    const error = new Error(`Invalid env: must be 'prod' or 'sandbox', got '${env}'`);
+    logger.error('Credential validation failed: env', { error: error.message, env });
+    throw error;
+  }
+
   logger.info('Entering exchangeRefreshToken function', {
     env,
     hasClientId: !!clientId,
@@ -175,7 +205,32 @@ async function exchangeRefreshToken(
       env
     });
     
-    throw new Error(`OAuth2 token exchange failed: ${response.status} ${response.statusText} - ${errorDetails}`);
+    // Provide actionable error message based on status code
+    let errorMessage = `OAuth2 token exchange failed: ${response.status} ${response.statusText}`;
+    
+    if (response.status === 401) {
+      errorMessage += '\n\nPossible causes:\n' +
+        '1. Invalid or expired refresh token - Regenerate refresh token in Tastytrade OAuth application\n' +
+        '2. Client ID/Secret mismatch - Verify TASTYTRADE_CLIENT_ID and TASTYTRADE_CLIENT_SECRET match your OAuth application\n' +
+        '3. Refresh token not associated with this OAuth application - Ensure refresh token was generated with the same Client ID/Secret\n' +
+        '4. Refresh token revoked or expired - Generate a new refresh token\n\n' +
+        'Action steps:\n' +
+        '- Verify credentials in Vercel match Tastytrade OAuth application\n' +
+        '- Regenerate refresh token if it expired\n' +
+        '- Check Tastytrade OAuth application settings at https://tastytrade.com/api/settings\n' +
+        '- Review Tastytrade OAuth2 documentation: https://developer.tastytrade.com';
+    } else if (response.status === 400) {
+      errorMessage += '\n\nPossible causes:\n' +
+        '1. Invalid request format - Check that grant_type=refresh_token is included\n' +
+        '2. Missing required parameters - Verify all required OAuth2 parameters are included\n\n' +
+        'Action steps:\n' +
+        '- Review request format and parameters\n' +
+        '- Check Tastytrade OAuth2 documentation for correct request format';
+    } else {
+      errorMessage += `\n\nError details: ${errorDetails}`;
+    }
+    
+    throw new Error(errorMessage);
   }
 
   const data = await response.json();
@@ -290,7 +345,20 @@ export async function getClient(): Promise<TastytradeSDK> {
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     logger.error('Failed to initialize Tastytrade client', { env: config.env }, error as Error);
-    throw new AuthenticationError(`Failed to initialize Tastytrade client: ${errorMessage}`);
+    
+    // Provide enhanced error message if it's an OAuth2-related error
+    let enhancedMessage = `Failed to initialize Tastytrade client: ${errorMessage}`;
+    
+    if (config.authMethod === 'oauth2' && errorMessage.includes('OAuth2')) {
+      enhancedMessage += '\n\nOAuth2 Authentication Troubleshooting:\n' +
+        '1. Verify TASTYTRADE_CLIENT_ID, TASTYTRADE_CLIENT_SECRET, and TASTYTRADE_REFRESH_TOKEN in Vercel\n' +
+        '2. Ensure credentials match your Tastytrade OAuth application\n' +
+        '3. Regenerate refresh token if it expired or was revoked\n' +
+        '4. Check Tastytrade OAuth application settings: https://tastytrade.com/api/settings\n' +
+        '5. Review error details above for specific OAuth2 error guidance';
+    }
+    
+    throw new AuthenticationError(enhancedMessage);
   }
 }
 

@@ -84,11 +84,19 @@ export function isTastytradeConfigured(): boolean {
 
 /**
  * Gets Tastytrade configuration or throws if not configured.
+ * Validates that credentials are non-empty and properly formatted.
  */
 export function getTastytradeConfig() {
   if (!isTastytradeConfigured()) {
     throw new Error(
       'Tastytrade API not configured. Set TASTYTRADE_ENV, TASTYTRADE_CLIENT_SECRET, and TASTYTRADE_REFRESH_TOKEN (OAuth2) or TASTYTRADE_USERNAME and TASTYTRADE_PASSWORD (legacy).'
+    );
+  }
+  
+  // Validate TASTYTRADE_ENV
+  if (!env.TASTYTRADE_ENV || (env.TASTYTRADE_ENV !== 'prod' && env.TASTYTRADE_ENV !== 'sandbox')) {
+    throw new Error(
+      `Invalid TASTYTRADE_ENV: must be 'prod' or 'sandbox', got '${env.TASTYTRADE_ENV}'`
     );
   }
   
@@ -98,21 +106,60 @@ export function getTastytradeConfig() {
   );
   
   if (hasOAuth2) {
+    // Validate OAuth2 credentials are non-empty and non-whitespace
+    const clientSecret = env.TASTYTRADE_CLIENT_SECRET?.trim();
+    const refreshToken = env.TASTYTRADE_REFRESH_TOKEN?.trim();
+    
+    if (!clientSecret || clientSecret.length === 0) {
+      throw new Error(
+        'TASTYTRADE_CLIENT_SECRET is empty or whitespace only. Please set a valid client secret in Vercel.'
+      );
+    }
+    
+    if (!refreshToken || refreshToken.length === 0) {
+      throw new Error(
+        'TASTYTRADE_REFRESH_TOKEN is empty or whitespace only. Please set a valid refresh token in Vercel. If your refresh token expired, you may need to regenerate it.'
+      );
+    }
+    
+    // Validate clientId if provided (optional but recommended)
+    let clientId = env.TASTYTRADE_CLIENT_ID?.trim();
+    if (clientId !== undefined && clientId !== null && clientId.length === 0) {
+      // Warn but don't fail - client_id is optional
+      console.warn('TASTYTRADE_CLIENT_ID is set but empty. Including client_id is recommended for OAuth2.');
+      clientId = undefined;
+    }
+    
     return {
-      env: env.TASTYTRADE_ENV!,
-      clientId: env.TASTYTRADE_CLIENT_ID,
-      clientSecret: env.TASTYTRADE_CLIENT_SECRET!,
-      refreshToken: env.TASTYTRADE_REFRESH_TOKEN!,
-      accountNumber: env.TASTYTRADE_ACCOUNT_NUMBER,
+      env: env.TASTYTRADE_ENV,
+      clientId: clientId,
+      clientSecret: clientSecret,
+      refreshToken: refreshToken,
+      accountNumber: env.TASTYTRADE_ACCOUNT_NUMBER?.trim() || undefined,
       authMethod: 'oauth2' as const,
     };
   } else {
-    // Legacy username/password
+    // Legacy username/password - validate they're non-empty
+    const username = env.TASTYTRADE_USERNAME?.trim();
+    const password = env.TASTYTRADE_PASSWORD?.trim();
+    
+    if (!username || username.length === 0) {
+      throw new Error(
+        'TASTYTRADE_USERNAME is empty or whitespace only. Please set a valid username in Vercel.'
+      );
+    }
+    
+    if (!password || password.length === 0) {
+      throw new Error(
+        'TASTYTRADE_PASSWORD is empty or whitespace only. Please set a valid password in Vercel.'
+      );
+    }
+    
     return {
-      env: env.TASTYTRADE_ENV!,
-      username: env.TASTYTRADE_USERNAME!,
-      password: env.TASTYTRADE_PASSWORD!,
-      accountNumber: env.TASTYTRADE_ACCOUNT_NUMBER,
+      env: env.TASTYTRADE_ENV,
+      username: username,
+      password: password,
+      accountNumber: env.TASTYTRADE_ACCOUNT_NUMBER?.trim() || undefined,
       authMethod: 'username_password' as const,
     };
   }
