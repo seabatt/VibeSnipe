@@ -38,6 +38,11 @@ async function exchangeRefreshToken(
     ? 'https://api.tastytrade.com' 
     : 'https://api.cert.tastytrade.com';
   
+  // OAuth2 token exchange endpoint
+  // According to Tastytrade API docs, refresh token flow requires:
+  // - grant_type: 'refresh_token'
+  // - refresh_token: the refresh token
+  // - client_secret: the client secret
   const response = await fetch(`${baseUrl}/oauth/token`, {
     method: 'POST',
     headers: {
@@ -46,7 +51,6 @@ async function exchangeRefreshToken(
     body: new URLSearchParams({
       grant_type: 'refresh_token',
       refresh_token: refreshToken,
-      client_id: '', // Not needed for refresh token flow
       client_secret: clientSecret,
     }),
   });
