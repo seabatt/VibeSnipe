@@ -45,32 +45,30 @@ async function exchangeRefreshToken(
   // - refresh_token: the refresh token
   // - client_secret: the client secret
   // - client_id: optional but recommended
-  // Some OAuth2 implementations use Basic auth with client_id:client_secret
+  // 
+  // OAuth2 RFC allows two authentication methods:
+  // 1. Basic auth with client_id:client_secret (preferred when client_id available)
+  // 2. Body params with client_id and client_secret
+  // We'll try Basic auth first if client_id is available, fallback to body params
   
   const headers: HeadersInit = {
     'Content-Type': 'application/x-www-form-urlencoded',
   };
-  
-  // Add Basic auth header if client_id is available
-  if (clientId) {
-    const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
-    headers['Authorization'] = `Basic ${credentials}`;
-  }
   
   const bodyParams: Record<string, string> = {
     grant_type: 'refresh_token',
     refresh_token: refreshToken,
   };
   
-  // Include client_id in body if available (many OAuth2 servers require it)
+  // Use Basic auth if client_id is available (OAuth2 RFC preferred method)
   if (clientId) {
-    bodyParams.client_id = clientId;
+    const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+    headers['Authorization'] = `Basic ${credentials}`;
+    // Don't include client_id/client_secret in body when using Basic auth
+  } else {
+    // Fallback: include client_secret in body when client_id is not available
+    bodyParams.client_secret = clientSecret;
   }
-  
-  // Include client_secret in body (required for refresh token flow)
-  // Note: Some OAuth2 servers use Basic auth, some use body params, some use both
-  // We'll include it in body as well for compatibility
-  bodyParams.client_secret = clientSecret;
   
   const response = await fetch(`${baseUrl}/oauth/token`, {
     method: 'POST',
