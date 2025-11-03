@@ -525,10 +525,18 @@ export async function getClient(): Promise<TastytradeSDK> {
         hasRefreshToken: !!config.refreshToken
       });
       
+      // Validate required credentials are present (TypeScript guard)
+      if (!config.refreshToken || !config.clientSecret) {
+        throw new Error(
+          'OAuth2 credentials are missing: refreshToken and clientSecret are required'
+        );
+      }
+      
       // OAuth2 authentication: exchange refresh token for access token
+      // Non-null assertions are safe here because we've validated above
       const accessToken = await exchangeRefreshToken(
-        config.refreshToken,
-        config.clientSecret,
+        config.refreshToken!,
+        config.clientSecret!,
         config.clientId,
         config.env
       );
