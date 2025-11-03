@@ -22,6 +22,18 @@ export async function GET() {
       );
     }
     
+    // Validate required credentials are present (TypeScript guard)
+    if (!config.refreshToken || !config.clientSecret) {
+      return NextResponse.json(
+        { 
+          error: 'Missing required OAuth2 credentials',
+          hasRefreshToken: !!config.refreshToken,
+          hasClientSecret: !!config.clientSecret
+        },
+        { status: 400 }
+      );
+    }
+    
     // Test token exchange
     const baseUrl = config.env === 'prod' 
       ? 'https://api.tastytrade.com' 
@@ -31,9 +43,9 @@ export async function GET() {
       env: config.env,
       hasClientId: !!config.clientId,
       clientIdLength: config.clientId?.length || 0,
-      clientSecretLength: config.clientSecret?.length || 0,
-      refreshTokenLength: config.refreshToken?.length || 0,
-      refreshTokenPrefix: config.refreshToken?.substring(0, 10) || 'none'
+      clientSecretLength: config.clientSecret.length,
+      refreshTokenLength: config.refreshToken.length,
+      refreshTokenPrefix: config.refreshToken.substring(0, 10)
     });
     
     // Try Basic auth method first
