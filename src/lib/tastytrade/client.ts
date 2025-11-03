@@ -39,7 +39,11 @@ async function exchangeRefreshToken(
     env,
     hasClientId: !!clientId,
     hasRefreshToken: !!refreshToken,
-    hasClientSecret: !!clientSecret
+    hasClientSecret: !!clientSecret,
+    clientIdLength: clientId?.length || 0,
+    clientSecretLength: clientSecret?.length || 0,
+    refreshTokenLength: refreshToken?.length || 0,
+    refreshTokenPrefix: refreshToken?.substring(0, 10) || 'none' // First 10 chars for debugging
   });
   
   const baseUrl = env === 'prod' 
@@ -229,7 +233,10 @@ export async function getClient(): Promise<TastytradeSDK> {
     hasClientId: !!config.clientId,
     hasClientSecret: !!config.clientSecret,
     hasRefreshToken: !!config.refreshToken,
-    env: config.env
+    env: config.env,
+    clientIdLength: config.clientId?.length || 0,
+    clientSecretLength: config.clientSecret?.length || 0,
+    refreshTokenLength: config.refreshToken?.length || 0
   });
 
   try {
