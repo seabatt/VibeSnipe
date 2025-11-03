@@ -215,13 +215,51 @@ export function Positions() {
   }
 
   if (error) {
+    // Check if this is a configuration error
+    const isConfigError = error.toLowerCase().includes('not configured') || 
+                         error.toLowerCase().includes('tastytrade api not configured') ||
+                         error.toLowerCase().includes('set tastytrde') ||
+                         error.toLowerCase().includes('tastytrde_env') ||
+                         error.toLowerCase().includes('tastytrde_username') ||
+                         error.toLowerCase().includes('tastytrde_password') ||
+                         error.toLowerCase().includes('missing required environment');
+
     return (
       <div className="h-full flex items-center justify-center bg-surface-dark dark:bg-surface-dark border border-border-dark dark:border-border-dark rounded-16">
-        <div className="text-center">
-          <p className="text-risk text-sm mb-4">Failed to load positions</p>
-          <p className="text-text-secondary-dark dark:text-text-secondary-dark text-xs mb-4">
-            {error}
+        <div className="text-center max-w-md px-6">
+          <p className="text-risk text-sm mb-4 font-medium">
+            {isConfigError ? 'Tastytrade API Not Configured' : 'Failed to load positions'}
           </p>
+          
+          {isConfigError ? (
+            <div className="space-y-3">
+              <p className="text-text-secondary-dark dark:text-text-secondary-dark text-xs">
+                The Tastytrade API credentials are not configured. To view your positions, please set the following environment variables in Vercel:
+              </p>
+              <div className="text-left bg-surface dark:bg-surface border border-border-dark dark:border-border-dark rounded-8 p-3 text-xs space-y-1 font-mono">
+                <div className="text-text-primary-dark dark:text-text-primary-dark">
+                  <span className="text-text-secondary-dark dark:text-text-secondary-dark">Required:</span>
+                  <div className="mt-2 ml-2 space-y-1">
+                    <div>TASTYTRADE_ENV=prod</div>
+                    <div>TASTYTRADE_USERNAME=your_username</div>
+                    <div>TASTYTRADE_PASSWORD=your_password</div>
+                  </div>
+                  <span className="text-text-secondary-dark dark:text-text-secondary-dark block mt-2">Optional:</span>
+                  <div className="mt-2 ml-2">
+                    <div>TASTYTRADE_ACCOUNT_NUMBER=5WZ54420</div>
+                  </div>
+                </div>
+              </div>
+              <p className="text-text-secondary-dark dark:text-text-secondary-dark text-xs mt-3">
+                After setting these variables, redeploy your application in Vercel.
+              </p>
+            </div>
+          ) : (
+            <p className="text-text-secondary-dark dark:text-text-secondary-dark text-xs mb-4">
+              {error}
+            </p>
+          )}
+          
           <button
             onClick={fetchPositions}
             className="px-4 py-2 bg-surface dark:bg-surface border border-border-dark dark:border-border-dark text-text-primary-dark dark:text-text-primary-dark text-xs rounded-12 hover:bg-border-dark dark:hover:bg-border-dark transition-colors"
