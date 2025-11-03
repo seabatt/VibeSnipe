@@ -62,10 +62,15 @@ async function exchangeRefreshToken(
     refresh_token: refreshToken,
   };
   
-  // Include client_secret in body if not using Basic auth
-  if (!clientId) {
-    bodyParams.client_secret = clientSecret;
+  // Include client_id in body if available (many OAuth2 servers require it)
+  if (clientId) {
+    bodyParams.client_id = clientId;
   }
+  
+  // Include client_secret in body (required for refresh token flow)
+  // Note: Some OAuth2 servers use Basic auth, some use body params, some use both
+  // We'll include it in body as well for compatibility
+  bodyParams.client_secret = clientSecret;
   
   const response = await fetch(`${baseUrl}/oauth/token`, {
     method: 'POST',
@@ -79,9 +84,21 @@ async function exchangeRefreshToken(
       status: response.status,
       statusText: response.statusText,
       error: errorText,
-      url: `${baseUrl}/oauth/token`
+      url: `${baseUrl}/oauth/token`,
+      hasClientId: !!clientId,
+      hasBasicAuth: !!headers['Authorization']
     });
-    throw new Error(`OAuth2 token exchange failed: ${response.status} ${response.statusText} - ${errorText}`);
+    
+    // Try to parse error as JSON if possible
+    let errorDetails = errorText;
+    try {
+      const errorJson = JSON.parse(errorText);
+      errorDetails = JSON.stringify(errorJson, null, 2);
+    } catch {
+      // Not JSON, use as-is
+    }
+    
+    throw new Error(`OAuth2 token exchange failed: ${response.status} ${response.statusText} - ${errorDetails}`);
   }
 
   const data = await response.json();
