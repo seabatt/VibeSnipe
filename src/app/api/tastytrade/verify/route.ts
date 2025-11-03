@@ -86,7 +86,8 @@ export async function GET() {
       };
       
       // clientId is guaranteed to be string here because of the if condition above
-      bodyParams.client_id = clientId;
+      // Use non-null assertion since we've already checked it exists
+      bodyParams.client_id = clientId!;
       bodyParams.client_secret = clientSecret;
       
       response = await fetch(`${baseUrl}/oauth/token`, {
