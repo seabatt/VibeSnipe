@@ -22,33 +22,32 @@ import { executeTradeLifecycle } from '@/lib/tradeOrchestrator';
 import { logger } from '@/lib/logger';
 import { fetchAndBuildVertical } from '@/lib/tastytrade/chains';
 import type { VerticalSpec } from '@/lib/tastytrade/types';
+import { parseTastyTradeAlert } from '@/lib/webhooks/alertParser';
 
 /**
  * Discord webhook payload structure.
- * This matches the expected format from 8Ball Discord alerts.
+ * Accepts two formats:
+ * 1. Structured JSON (from processed alerts)
+ * 2. Raw text (TastyTrade format - for MIT review)
  */
 interface DiscordWebhookPayload {
-  /** Underlying symbol */
-  underlying: string;
-  /** Strategy type (Vertical, Butterfly, etc.) */
-  strategy: string;
-  /** Direction (CALL or PUT) */
-  direction: 'CALL' | 'PUT';
-  /** Strikes array [shortStrike, longStrike, wingStrike?] */
-  strikes: number[];
-  /** Price */
-  price: number;
-  /** Quantity */
-  quantity: number;
-  /** Optional expiry date */
+  // Structured format
+  underlying?: string;
+  strategy?: string;
+  direction?: 'CALL' | 'PUT';
+  strikes?: number[];
+  price?: number;
+  quantity?: number;
   expiry?: string;
-  /** Optional account ID (will use default if not provided) */
   accountId?: string;
-  /** Optional rule bundle override */
   ruleBundle?: {
     takeProfitPct: number;
     stopLossPct: number;
   };
+  
+  // Raw text format (for parsing)
+  text?: string;
+  content?: string;
 }
 
 /**
@@ -106,10 +105,39 @@ export async function POST(request: Request) {
     // Parse webhook payload
     const payload: DiscordWebhookPayload = await request.json();
 
-    // Validate payload structure
-    if (!payload.underlying || !payload.strategy || !payload.strikes) {
+    // Try to parse raw TastyTrade format text (e.g., "SELL -1 Vertical SPX 100 31 Oct 25 6855/6860 CALL @0.3 LMT")
+    const rawText = payload.text || payload.content;
+    if (rawText) {
+      const parsed = parseTastyTradeAlert(rawText);
+      
+      if (!parsed) {
+        return NextResponse.json(
+          { error: 'Invalid alert format: could not parse TastyTrade text' },
+          { status: 400 }
+        );
+      }
+      
+      // Return parsed result for MIT review demo
+      return NextResponse.json({
+        success: true,
+        message: 'Alert received and parsed successfully',
+        parsed: {
+          underlying: parsed.underlying,
+          strategy: parsed.strategy,
+          direction: parsed.direction,
+          strikes: [parsed.longStrike, parsed.shortStrike, parsed.wingStrike].filter(Boolean),
+          price: parsed.limitPrice,
+          width: parsed.width,
+          expiry: parsed.expiry,
+          alertCredit: parsed.limitPrice, // This would be preserved in actual flow
+        },
+      });
+    }
+
+    // Fall back to structured format validation
+    if (!payload.underlying || !payload.strategy || !payload.strikes || !payload.direction || !payload.price) {
       return NextResponse.json(
-        { error: 'Invalid webhook payload: missing required fields' },
+        { error: 'Invalid webhook payload: missing required fields (underlying, strategy, strikes, direction, price)' },
         { status: 400 }
       );
     }
@@ -146,7 +174,18 @@ export async function POST(request: Request) {
       stopLossPct: 100,
     };
 
-    const intent = buildTradeIntentFromWebhook(payload, accountId, ruleBundle);
+    // Type narrowing after validation
+    const safePayload = {
+      underlying: payload.underlying!,
+      strategy: payload.strategy!,
+      direction: payload.direction! as 'CALL' | 'PUT',
+      strikes: payload.strikes!,
+      price: payload.price!,
+      quantity: payload.quantity || 1,
+      expiry: payload.expiry,
+    };
+    
+    const intent = buildTradeIntentFromWebhook(safePayload, accountId, ruleBundle);
 
     if (!validateTradeIntent(intent)) {
       return NextResponse.json(
@@ -167,7 +206,7 @@ export async function POST(request: Request) {
       targetDelta: 50, // Placeholder - would come from preset/config
       right: payload.direction,
       width: Math.abs(longStrike - shortStrike),
-      quantity: payload.quantity,
+      quantity: payload.quantity || 1,
     };
 
     // Fetch and build vertical

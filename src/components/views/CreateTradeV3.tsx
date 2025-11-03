@@ -5,6 +5,7 @@ import { Copy, Settings, ChevronDown, ChevronUp, Plus, Minus, X, Send, Activity,
 import { motion, AnimatePresence } from 'motion/react';
 import { useIsMobile } from '@/components/ui/use-mobile';
 import { useTokens } from '@/hooks/useTokens';
+import { useSettings } from '@/hooks/useSettings';
 import { useThemeContext } from '@/components/providers/ThemeProvider';
 import { useOrders } from '@/stores/useOrders';
 import { useQuotes } from '@/stores/useQuotes';
@@ -26,6 +27,8 @@ interface ParsedTrade {
   wingStrike?: number;
   limitPrice: number;
   width: number;
+  expiry?: string; // "2025-10-31" or undefined for 0DTE
+  alertCredit?: number; // Original credit from alert, preserved separately
   greeks?: {
     longDelta?: number;
     shortDelta?: number;
@@ -92,9 +95,28 @@ function parseDiscordAlert(text: string): ParsedTrade | null {
   const directionMatch = text.match(/\b(CALL|PUT)S?\b/i);
   const isButterfly = /butterfly|fly/i.test(text);
   
+  // Extract expiry date (e.g., "31 Oct 25" or "15 DEC 24")
+  const expiryMatch = text.match(/(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{2,4})/i);
+  let expiry: string | undefined;
+  if (expiryMatch) {
+    const day = parseInt(expiryMatch[1]);
+    const monthNames: { [key: string]: number } = {
+      jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+      jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
+    };
+    const month = monthNames[expiryMatch[2].toLowerCase()];
+    let year = parseInt(expiryMatch[3]);
+    if (year < 100) year += 2000; // Convert 2-digit to 4-digit year
+    const expiryDate = new Date(year, month, day);
+    expiry = expiryDate.toISOString().split('T')[0];
+  }
+  // If no expiry specified, leave undefined (will default to 0DTE elsewhere)
+  
   const longStrike = parseInt(strikesMatch[1]);
   const shortStrike = parseInt(strikesMatch[2]);
   const wingStrike = strikesMatch[3] ? parseInt(strikesMatch[3]) : undefined;
+  
+  const alertCredit = parseFloat(priceMatch[1]);
   
   return {
     underlying: underlyingMatch[1].toUpperCase() as Underlying,
@@ -103,25 +125,47 @@ function parseDiscordAlert(text: string): ParsedTrade | null {
     longStrike,
     shortStrike,
     wingStrike,
-    limitPrice: parseFloat(priceMatch[1]),
+    limitPrice: alertCredit, // Current market credit (will be updated with real quotes)
     width: shortStrike - longStrike,
+    expiry,
+    alertCredit, // Preserve original alert credit
   };
+}
+
+/**
+ * Calculate suggested contract quantity based on risk tolerance
+ * Returns the maximum number of contracts that fit within the account risk percentage
+ */
+function calculateSuggestedContracts(trade: ParsedTrade, accountSize: number, riskPercentage: number): number {
+  const { width, limitPrice } = trade;
+  const maxLossPerContract = (width - limitPrice) * 100; // Max loss per contract in dollars
+  const accountRiskDollars = accountSize * (riskPercentage / 100); // Total dollars to risk
+  
+  if (maxLossPerContract <= 0) return 1; // Safety check
+  
+  const suggestedContracts = Math.floor(accountRiskDollars / maxLossPerContract);
+  return Math.max(1, suggestedContracts); // Minimum 1 contract
 }
 
 function calculateRiskMetrics(trade: ParsedTrade, contracts: number, accountSize: number) {
   const { strategy, width, limitPrice } = trade;
   
+  // For credit spreads: max loss = width - credit, max gain = credit
+  const maxLossPerContract = width - limitPrice;
+  const maxGainPerContract = limitPrice;
+  
   if (strategy === 'Vertical') {
-    const maxGain = ((width * 100) - (limitPrice * 100)) * contracts;
-    const maxLoss = limitPrice * 100 * contracts;
+    const maxGain = maxGainPerContract * 100 * contracts;
+    const maxLoss = maxLossPerContract * 100 * contracts;
     const breakeven = trade.longStrike + limitPrice;
-    const ror = (maxGain / maxLoss) * 100;
+    const ror = maxLoss > 0 ? (maxGain / maxLoss) * 100 : 0;
     const riskPct = (maxLoss / accountSize) * 100;
     
     return { maxGain, maxLoss, breakeven, ror, riskPct, contracts };
   } else {
-    const maxGain = ((width * 100) - (limitPrice * 100)) * contracts;
-    const maxLoss = limitPrice * 100 * contracts;
+    // Butterfly has similar structure to vertical for max loss/gain
+    const maxGain = maxGainPerContract * 100 * contracts;
+    const maxLoss = maxLossPerContract * 100 * contracts;
     const breakeven = trade.longStrike + limitPrice;
     const riskPct = (maxLoss / accountSize) * 100;
     
@@ -129,7 +173,7 @@ function calculateRiskMetrics(trade: ParsedTrade, contracts: number, accountSize
       maxGain,
       maxLoss,
       breakeven,
-      ror: (maxGain / maxLoss) * 100,
+      ror: maxLoss > 0 ? (maxGain / maxLoss) * 100 : 0,
       riskPct,
       contracts,
     };
@@ -659,6 +703,7 @@ export function CreateTradeV3() {
   const { resolvedTheme } = useThemeContext();
   const { setPendingOrder } = useOrders();
   const { getQuote } = useQuotes();
+  const { accountValue, riskPercentage } = useSettings();
   
   const [flowStep, setFlowStep] = useState<FlowStep>('choose');
   const [parsedTrade, setParsedTrade] = useState<ParsedTrade | null>(null);
@@ -671,7 +716,27 @@ export function CreateTradeV3() {
     shortDelta?: number;
     longDelta?: number;
   } | null>(null);
+  const [accountId, setAccountId] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
   const MAX_ATTEMPTS = 2;
+
+  // Fetch account ID on mount
+  useEffect(() => {
+    async function fetchAccount() {
+      try {
+        const response = await fetch('/api/tastytrade/auth');
+        if (!response.ok) {
+          throw new Error(await response.text());
+        }
+        const data = await response.json();
+        setAccountId(data.accountNumber);
+      } catch (error) {
+        console.error('Failed to fetch account:', error);
+        setAuthError(error instanceof Error ? error.message : 'Unknown error');
+      }
+    }
+    fetchAccount();
+  }, []);
 
   const handleChoose = (method: 'paste' | 'preset') => {
     setFlowStep(method);
@@ -680,8 +745,8 @@ export function CreateTradeV3() {
   // Fetch Greeks from option chain
   const fetchAndUpdateGreeks = async (trade: ParsedTrade) => {
     try {
-      const today = new Date().toISOString().split('T')[0];
-      const chain = await fetchOptionChain(trade.underlying, today);
+      const expiry = trade.expiry || new Date().toISOString().split('T')[0]; // Use parsed expiry or default to 0DTE
+      const chain = await fetchOptionChain(trade.underlying, expiry);
       
       const longContract = chain.find(c => 
         c.strike === trade.longStrike && c.right === trade.direction
@@ -705,6 +770,7 @@ export function CreateTradeV3() {
         
         setParsedTrade({
           ...trade,
+          limitPrice: spreadMid, // Update to live market price
           greeks,
         });
         
@@ -728,6 +794,11 @@ export function CreateTradeV3() {
     setParsedTrade(trade);
     setAdjustmentAttempts(0);
     setOriginalAlertDelta(null);
+    
+    // Auto-calculate suggested contract quantity based on risk settings
+    const suggestedContracts = calculateSuggestedContracts(trade, accountValue, riskPercentage);
+    setContracts(suggestedContracts);
+    
     await fetchAndUpdateGreeks(trade);
     setFlowStep('preview');
   };
@@ -752,6 +823,11 @@ export function CreateTradeV3() {
     setSlPct(preset.slPct);
     setAdjustmentAttempts(0);
     setOriginalAlertDelta(null);
+    
+    // Auto-calculate suggested contract quantity based on risk settings
+    const suggestedContracts = calculateSuggestedContracts(mockTrade, accountValue, riskPercentage);
+    setContracts(suggestedContracts);
+    
     await fetchAndUpdateGreeks(mockTrade);
     setFlowStep('preview');
   };
@@ -761,8 +837,8 @@ export function CreateTradeV3() {
     
     try {
       // Fetch current option chain
-      const today = new Date().toISOString().split('T')[0];
-      const chain = await fetchOptionChain(parsedTrade.underlying, today);
+      const expiry = parsedTrade.expiry || new Date().toISOString().split('T')[0]; // Use parsed expiry or default to 0DTE
+      const chain = await fetchOptionChain(parsedTrade.underlying, expiry);
       
       // Filter by direction
       const relevantChain = chain.filter(c => c.right === parsedTrade.direction);
@@ -834,37 +910,53 @@ export function CreateTradeV3() {
     }
   };
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     if (!parsedTrade) return;
     
-    const legs: TradeLeg[] = [
-      {
-        action: 'BUY',
-        right: parsedTrade.direction,
-        strike: parsedTrade.longStrike,
-        expiry: new Date().toISOString().split('T')[0],
-        quantity: contracts,
-        price: parsedTrade.limitPrice,
-      },
-      {
-        action: 'SELL',
-        right: parsedTrade.direction,
-        strike: parsedTrade.shortStrike,
-        expiry: new Date().toISOString().split('T')[0],
-        quantity: contracts,
-        price: parsedTrade.limitPrice,
-      },
-    ];
-
-    const ruleBundle: RuleBundle = {
-      takeProfitPct: tpPct,
-      stopLossPct: slPct,
-      timeExit: selectedPreset?.timeExit,
-    };
-
-    setPendingOrder({ legs, ruleBundle });
+    if (!accountId) {
+      alert('Account not loaded. Please refresh the page.');
+      return;
+    }
+    
     setFlowStep('executing');
-    setTimeout(() => setFlowStep('working'), 1500);
+    
+    try {
+      const response = await fetch('/api/tastytrade/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kind: 'vertical',
+          spec: {
+            underlying: parsedTrade.underlying,
+            expiration: parsedTrade.expiry || new Date().toISOString().split('T')[0],
+            targetDelta: parsedTrade.greeks?.shortDelta || 0.50,
+            right: parsedTrade.direction,
+            width: parsedTrade.width,
+            quantity: contracts,
+          },
+          entry: {
+            limitPrice: parsedTrade.limitPrice,
+            orderType: 'LIMIT',
+            accountId,
+          },
+        }),
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText);
+      }
+      
+      const result = await response.json();
+      
+      console.log('✅ Order submitted:', result);
+      alert(`Order submitted! ID: ${result.orderId}`);
+      setFlowStep('working');
+    } catch (error) {
+      console.error('❌ Order failed:', error);
+      alert(`Order failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setFlowStep('preview');
+    }
   };
 
   const handleCancel = () => {
@@ -885,7 +977,7 @@ export function CreateTradeV3() {
     age: 0.3,
   } : { bid: 0, mid: 0, ask: 0, last: 0, spread: 0, age: 0 };
   
-  const metrics = parsedTrade ? calculateRiskMetrics(parsedTrade, contracts, 25000) : null;
+  const metrics = parsedTrade ? calculateRiskMetrics(parsedTrade, contracts, accountValue) : null;
   const riskCurve = parsedTrade ? generateRiskCurve(parsedTrade, currentPrice, contracts) : [];
   const bracketPrices = parsedTrade && contracts > 0
     ? calculateBracketPrices(parsedTrade, tpPct, slPct, contracts)
@@ -893,6 +985,30 @@ export function CreateTradeV3() {
 
   return (
     <div style={{ backgroundColor: colors.bg, color: colors.textPrimary, minHeight: '100vh' }}>
+      {/* Auth Error Banner */}
+      {authError && (
+        <div style={{ 
+          padding: isMobile ? `${tokens.space.md}px` : `${tokens.space.lg}px`, 
+          backgroundColor: '#ff000020', 
+          border: '1px solid #ff0000',
+          borderRadius: '8px',
+          margin: `${tokens.space.lg}px`,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: `${tokens.space.sm}px` }}>
+            <AlertCircle size={20} color="#ff0000" />
+            <div>
+              <strong style={{ color: '#ff0000' }}>⚠️ TastyTrade authentication failed:</strong>
+              <br />
+              <span style={{ fontSize: `${tokens.type.sizes.sm}px` }}>{authError}</span>
+              <br />
+              <span style={{ fontSize: `${tokens.type.sizes.xs}px`, opacity: 0.8 }}>
+                Check your credentials in .env.local
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+      
       {/* Header */}
       <div style={{
         maxWidth: '1400px',
@@ -943,8 +1059,8 @@ export function CreateTradeV3() {
               contracts={contracts}
               tpPct={tpPct}
               slPct={slPct}
-              accountValue={25000}
-              riskPercentage={2}
+              accountValue={accountValue}
+              riskPercentage={riskPercentage}
               isMobile={isMobile}
               bracketPrices={bracketPrices}
               onContractsChange={setContracts}

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { motion } from 'motion/react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer, ReferenceLine, Tooltip as RechartsTooltip } from 'recharts';
-import { ChevronUp, ChevronDown, Plus, Minus, X, Send } from 'lucide-react';
+import { ChevronUp, ChevronDown, Plus, Minus, X, Send, Check } from 'lucide-react';
 import { useTokens } from '@/hooks/useTokens';
 
 interface ParsedTrade {
@@ -15,6 +15,8 @@ interface ParsedTrade {
   wingStrike?: number;
   limitPrice: number;
   width: number;
+  expiry?: string; // "2025-10-31" or undefined for 0DTE
+  alertCredit?: number; // Original credit from alert
   greeks?: {
     longDelta?: number;
     shortDelta?: number;
@@ -105,6 +107,25 @@ export function PreviewStep({
   const riskPerTrade = accountValue * (riskPercentage / 100);
   const spreadCost = trade.limitPrice * 100;
 
+  // Calculate suggested contract quantity based on risk settings
+  const maxLossPerContract = (trade.width - trade.limitPrice) * 100;
+  const accountRiskDollars = accountValue * (riskPercentage / 100);
+  const suggestedContracts = maxLossPerContract > 0 
+    ? Math.max(1, Math.floor(accountRiskDollars / maxLossPerContract))
+    : 1;
+  
+  const isSuggestedQuantity = contracts === suggestedContracts;
+
+  // Credit gap analysis (alert vs market)
+  const alertCredit = trade.alertCredit;
+  const marketCredit = trade.greeks?.spreadMid || trade.limitPrice;
+  const creditGap = alertCredit ? marketCredit - alertCredit : null;
+  const creditGapPercent = alertCredit && creditGap !== null 
+    ? ((creditGap / alertCredit) * 100).toFixed(1)
+    : null;
+  const hasCreditGap = alertCredit && Math.abs(creditGap || 0) > 0.05; // $0.05 threshold
+  const isWorseCredit = creditGap !== null && creditGap < -0.05;
+
   // Calculate if re-anchor needed
   const strikeAnchor = trade.shortStrike;
   const distanceFromAnchor = currentPrice - strikeAnchor;
@@ -127,8 +148,75 @@ export function PreviewStep({
         gap: isMobile ? `${tokens.space.md}px` : `${tokens.space.lg}px`,
         padding: isMobile ? `${tokens.space.md}px` : `${tokens.space.lg}px`,
       }}
-    >
-      {/* Market Context - Show before everything else */}
+      >
+      {/* Credit Gap Warning - Show before everything else if alert credit differs */}
+      {hasCreditGap && alertCredit && (
+        <div style={{
+          padding: isMobile ? `${tokens.space.md}px` : `${tokens.space.lg}px`,
+          backgroundColor: isWorseCredit ? colors.semantic.risk + '10' : colors.semantic.info + '10',
+          border: `1px solid ${isWorseCredit ? colors.semantic.risk : colors.semantic.info}`,
+          borderRadius: `${tokens.radius.md}px`,
+          marginBottom: `${tokens.space.lg}px`,
+        }}>
+          <div style={{
+            fontSize: `${tokens.type.sizes.xs}px`,
+            color: colors.textSecondary,
+            textTransform: 'uppercase',
+            marginBottom: `${tokens.space.sm}px`,
+          }}>
+            Credit Analysis
+          </div>
+          
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: `${tokens.space.sm}px`,
+            marginBottom: `${tokens.space.sm}px`,
+          }}>
+            <div>
+              <span style={{ fontSize: `${tokens.type.sizes.base}px`, color: colors.textPrimary }}>
+                Alert Credit: ${alertCredit.toFixed(2)}
+              </span>
+              {' → '}
+              <span style={{ fontSize: `${tokens.type.sizes.base}px`, color: marketCredit >= alertCredit ? colors.semantic.profit : colors.semantic.risk }}>
+                Market: ${marketCredit.toFixed(2)}
+              </span>
+            </div>
+            {creditGap !== null && (
+              <div style={{
+                fontSize: `${tokens.type.sizes.lg}px`,
+                fontWeight: tokens.type.weights.medium,
+                color: isWorseCredit ? colors.semantic.risk : colors.semantic.profit,
+              }}>
+                {creditGap > 0 ? '+' : ''}{creditGap.toFixed(2)} ({creditGapPercent}%)
+              </div>
+            )}
+          </div>
+          
+          {isWorseCredit && (
+            <div style={{
+              fontSize: `${tokens.type.sizes.sm}px`,
+              color: colors.semantic.risk,
+              fontStyle: 'italic',
+            }}>
+              ⚠️ Market credit is below alert. Consider re-anchoring strikes or waiting for better pricing.
+            </div>
+          )}
+          
+          {!isWorseCredit && creditGap !== null && creditGap > 0.05 && (
+            <div style={{
+              fontSize: `${tokens.type.sizes.sm}px`,
+              color: colors.semantic.profit,
+            }}>
+              ✓ Market credit is better than alert
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Market Context - Show if re-anchoring needed */}
       {needsReanchor && onStrikeNudge && (
         <div style={{
           padding: isMobile ? `${tokens.space.md}px` : `${tokens.space.lg}px`,
@@ -592,10 +680,32 @@ export function PreviewStep({
           <div style={{
             fontSize: `${tokens.type.sizes.xs}px`,
             color: colors.textSecondary,
-            marginBottom: `${tokens.space.lg}px`,
+            marginBottom: `${tokens.space.xs}px`,
           }}>
             ${spreadCost.toFixed(2)} per contract
           </div>
+          
+          {isSuggestedQuantity ? (
+            <div style={{
+              fontSize: `${tokens.type.sizes.xs}px`,
+              color: colors.semantic.info,
+              marginBottom: `${tokens.space.lg}px`,
+              display: 'flex',
+              alignItems: 'center',
+              gap: `${tokens.space.xs}px`,
+            }}>
+              <Check size={12} />
+              Suggested based on {riskPercentage}% risk
+            </div>
+          ) : (
+            <div style={{
+              fontSize: `${tokens.type.sizes.xs}px`,
+              color: colors.textSecondary,
+              marginBottom: `${tokens.space.lg}px`,
+            }}>
+              User-adjusted from {suggestedContracts} suggested
+            </div>
+          )}
 
           <div style={{
             display: 'flex',

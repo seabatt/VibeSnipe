@@ -12,6 +12,7 @@ import { executeTradeLifecycle } from '@/lib/tradeOrchestrator';
 import { buildTradeIntent, verticalLegsToTradeLegs } from '@/lib/tradeIntent';
 import { fetchAndBuildVertical } from '@/lib/tastytrade/chains';
 import type { VerticalSpec } from '@/lib/tastytrade/types';
+import { isTastytradeConfigured } from '@/lib/env';
 
 /**
  * Request body structure for order submission.
@@ -43,6 +44,14 @@ interface OrderRequest {
  */
 export async function POST(request: Request) {
   try {
+    // Check credentials configured
+    if (!isTastytradeConfigured()) {
+      return NextResponse.json(
+        { error: 'TastyTrade not configured. Set TASTYTRADE_USERNAME and TASTYTRADE_PASSWORD in .env.local' },
+        { status: 503 }
+      );
+    }
+    
     // Parse request body
     const body: OrderRequest = await request.json();
 

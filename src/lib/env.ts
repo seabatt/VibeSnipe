@@ -94,9 +94,15 @@ export function getTastytradeConfig() {
   }
   
   // Validate TASTYTRADE_ENV
-  if (!env.TASTYTRADE_ENV || (env.TASTYTRADE_ENV !== 'prod' && env.TASTYTRADE_ENV !== 'sandbox')) {
+  if (!env.TASTYTRADE_ENV) {
     throw new Error(
-      `Invalid TASTYTRADE_ENV: must be 'prod' or 'sandbox', got '${env.TASTYTRADE_ENV}'`
+      'TASTYTRADE_ENV is missing. Please set TASTYTRADE_ENV to either "sandbox" or "prod" in Vercel environment variables.'
+    );
+  }
+  
+  if (env.TASTYTRADE_ENV !== 'prod' && env.TASTYTRADE_ENV !== 'sandbox') {
+    throw new Error(
+      `Invalid TASTYTRADE_ENV: must be 'prod' or 'sandbox', got '${env.TASTYTRADE_ENV}'. Please set TASTYTRADE_ENV to either "sandbox" or "prod" in Vercel environment variables.`
     );
   }
   
@@ -110,15 +116,18 @@ export function getTastytradeConfig() {
     const clientSecret = env.TASTYTRADE_CLIENT_SECRET?.trim();
     const refreshToken = env.TASTYTRADE_REFRESH_TOKEN?.trim();
     
+    // Collect all missing/invalid credentials for better error messages
+    const credentialErrors: string[] = [];
+    
     if (!clientSecret || clientSecret.length === 0) {
-      throw new Error(
-        'TASTYTRADE_CLIENT_SECRET is empty or whitespace only. Please set a valid client secret in Vercel.'
+      credentialErrors.push(
+        'TASTYTRADE_CLIENT_SECRET is missing, empty, or whitespace only. Please set a valid client secret in Vercel environment variables.'
       );
     }
     
     if (!refreshToken || refreshToken.length === 0) {
-      throw new Error(
-        'TASTYTRADE_REFRESH_TOKEN is empty or whitespace only. Please set a valid refresh token in Vercel. If your refresh token expired, you may need to regenerate it.'
+      credentialErrors.push(
+        'TASTYTRADE_REFRESH_TOKEN is missing, empty, or whitespace only. Please set a valid refresh token in Vercel environment variables. If your refresh token expired, you may need to regenerate it.'
       );
     }
     
@@ -126,8 +135,27 @@ export function getTastytradeConfig() {
     let clientId = env.TASTYTRADE_CLIENT_ID?.trim();
     if (clientId !== undefined && clientId !== null && clientId.length === 0) {
       // Warn but don't fail - client_id is optional
-      console.warn('TASTYTRADE_CLIENT_ID is set but empty. Including client_id is recommended for OAuth2.');
+      console.warn('⚠️  TASTYTRADE_CLIENT_ID is set but empty. Including client_id is recommended for OAuth2.');
       clientId = undefined;
+    }
+    
+    // If there are credential errors, throw a comprehensive error
+    if (credentialErrors.length > 0) {
+      const errorMessage = 
+        'Tastytrade OAuth2 credentials are invalid:\n\n' +
+        credentialErrors.map((err, idx) => `${idx + 1}. ${err}`).join('\n') +
+        '\n\nAction steps:\n' +
+        '1. Go to Vercel Dashboard → Your Project → Settings → Environment Variables\n' +
+        '2. Verify the following variables are set:\n' +
+        '   - TASTYTRADE_ENV (must be "sandbox" or "prod")\n' +
+        '   - TASTYTRADE_CLIENT_SECRET (required)\n' +
+        '   - TASTYTRADE_REFRESH_TOKEN (required)\n' +
+        '   - TASTYTRADE_CLIENT_ID (optional but recommended)\n' +
+        '3. Ensure values are not empty or whitespace-only\n' +
+        '4. Verify credentials match your Tastytrade OAuth application\n' +
+        '5. Regenerate refresh token if it expired: https://tastytrade.com/api/settings';
+      
+      throw new Error(errorMessage);
     }
     
     return {

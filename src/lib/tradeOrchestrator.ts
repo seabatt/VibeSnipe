@@ -314,14 +314,22 @@ export async function executeTradeLifecycle(
   if (finalConfig.attachBrackets) {
     try {
       // Calculate TP/SL prices from rule bundle
-      const entryPrice = submitResult.order.netPrice || 0;
-      const tpPrice = entryPrice * (1 + intent.ruleBundle.takeProfitPct / 100);
-      const slPrice = entryPrice * (1 - intent.ruleBundle.stopLossPct / 100);
+      // For credit spreads, TP is LOWER price (buy back cheaper), SL is HIGHER price (buy back more)
+      const entryCredit = submitResult.order.netPrice || intent.limitPrice || 0;
+      
+      // TP: Buy back at (1 - takeProfitPct%) of credit = 0.50 * credit for 50% TP
+      // SL: Buy back at (1 + stopLossPct%) of credit = 2.00 * credit for 100% SL
+      const tpPrice = entryCredit * (1 - intent.ruleBundle.takeProfitPct / 100);
+      const slPrice = entryCredit * (1 + intent.ruleBundle.stopLossPct / 100);
+      
+      // Ensure prices are positive and SL > TP
+      const finalTpPrice = Math.max(0.05, tpPrice);
+      const finalSlPrice = Math.max(finalTpPrice + 0.05, slPrice);
 
       const bracketResult = await executeAttachBrackets(
         submitResult.order.id,
-        tpPrice,
-        slPrice,
+        finalTpPrice,
+        finalSlPrice,
         intent.accountId,
         verticalLegs,
         intent.quantity,
