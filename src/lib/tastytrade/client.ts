@@ -35,6 +35,13 @@ async function exchangeRefreshToken(
   clientId: string | undefined,
   env: 'prod' | 'sandbox'
 ): Promise<string> {
+  logger.info('Entering exchangeRefreshToken function', {
+    env,
+    hasClientId: !!clientId,
+    hasRefreshToken: !!refreshToken,
+    hasClientSecret: !!clientSecret
+  });
+  
   const baseUrl = env === 'prod' 
     ? 'https://api.tastytrade.com' 
     : 'https://api.cert.tastytrade.com';
@@ -206,13 +213,24 @@ async function exchangeRefreshToken(
  * ```
  */
 export async function getClient(): Promise<TastytradeSDK> {
-  // Return cached instance if available and still valid
+  // Log whether we're using cached client or initializing new one
   if (clientInstance) {
+    logger.info('Using cached Tastytrade client instance');
     return clientInstance;
   }
 
+  logger.info('Initializing new Tastytrade client instance');
+  
   // Validate required environment variables
   const config = getTastytradeConfig();
+  
+  logger.info('Tastytrade configuration loaded', {
+    authMethod: config.authMethod,
+    hasClientId: !!config.clientId,
+    hasClientSecret: !!config.clientSecret,
+    hasRefreshToken: !!config.refreshToken,
+    env: config.env
+  });
 
   try {
     // Determine base URLs based on environment
@@ -229,6 +247,12 @@ export async function getClient(): Promise<TastytradeSDK> {
 
     // Authenticate based on method
     if (config.authMethod === 'oauth2') {
+      logger.info('Starting OAuth2 authentication flow', {
+        env: config.env,
+        hasClientId: !!config.clientId,
+        hasRefreshToken: !!config.refreshToken
+      });
+      
       // OAuth2 authentication: exchange refresh token for access token
       const accessToken = await exchangeRefreshToken(
         config.refreshToken,
@@ -243,7 +267,8 @@ export async function getClient(): Promise<TastytradeSDK> {
       clientInstance.session.authToken = `Bearer ${accessToken}`;
       
       logger.info('Tastytrade client initialized and authenticated via OAuth2', { 
-        env: config.env 
+        env: config.env,
+        tokenLength: accessToken?.length || 0
       });
     } else {
       // Legacy username/password authentication

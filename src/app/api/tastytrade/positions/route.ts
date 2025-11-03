@@ -7,7 +7,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { getClient, getAccount } from '@/lib/tastytrade/client';
+import { getClient, getAccount, resetClient } from '@/lib/tastytrade/client';
 import { logger } from '@/lib/logger';
 
 /**
@@ -55,11 +55,24 @@ export async function GET() {
         samplePosition: positions.length > 0 ? Object.keys(positions[0]) : []
       });
     } catch (apiError) {
+      const errorMessage = apiError instanceof Error ? apiError.message : 'Unknown error';
+      const isAuthError = errorMessage.includes('401') || errorMessage.includes('status code 401');
+      
       logger.error('Error fetching positions from API', { 
         accountNumber,
-        error: apiError instanceof Error ? apiError.message : 'Unknown error',
+        error: errorMessage,
+        isAuthError,
         stack: apiError instanceof Error ? apiError.stack : undefined
       });
+      
+      // If it's an authentication error, reset the client to force re-authentication
+      if (isAuthError) {
+        logger.warn('401 authentication error detected, resetting client cache', {
+          accountNumber
+        });
+        resetClient();
+      }
+      
       throw apiError;
     }
 
