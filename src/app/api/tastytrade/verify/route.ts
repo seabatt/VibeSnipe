@@ -34,6 +34,12 @@ export async function GET() {
       );
     }
     
+    // Assign to local const variables after guard clause for TypeScript narrowing
+    // Non-null assertions are safe here because we've already validated in the guard clause above
+    const refreshToken: string = config.refreshToken!;
+    const clientSecret: string = config.clientSecret!;
+    const clientId: string | undefined = config.clientId;
+    
     // Test token exchange
     const baseUrl = config.env === 'prod' 
       ? 'https://api.tastytrade.com' 
@@ -41,11 +47,11 @@ export async function GET() {
     
     logger.info('Verifying OAuth2 credentials', {
       env: config.env,
-      hasClientId: !!config.clientId,
-      clientIdLength: config.clientId?.length || 0,
-      clientSecretLength: config.clientSecret.length,
-      refreshTokenLength: config.refreshToken.length,
-      refreshTokenPrefix: config.refreshToken.substring(0, 10)
+      hasClientId: !!clientId,
+      clientIdLength: clientId?.length || 0,
+      clientSecretLength: clientSecret.length,
+      refreshTokenLength: refreshToken.length,
+      refreshTokenPrefix: refreshToken.substring(0, 10)
     });
     
     // Try Basic auth method first
@@ -54,14 +60,14 @@ export async function GET() {
       'Content-Type': 'application/x-www-form-urlencoded',
     };
     
-    if (config.clientId) {
-      const credentials = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString('base64');
+    if (clientId) {
+      const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
       headers['Authorization'] = `Basic ${credentials}`;
     }
     
     const bodyParams: Record<string, string> = {
       grant_type: 'refresh_token',
-      refresh_token: config.refreshToken,
+      refresh_token: refreshToken,
     };
     
     let response = await fetch(`${baseUrl}/oauth/token`, {
@@ -79,8 +85,8 @@ export async function GET() {
         'Content-Type': 'application/x-www-form-urlencoded',
       };
       
-      bodyParams.client_id = config.clientId;
-      bodyParams.client_secret = config.clientSecret;
+      bodyParams.client_id = clientId;
+      bodyParams.client_secret = clientSecret;
       
       response = await fetch(`${baseUrl}/oauth/token`, {
         method: 'POST',
