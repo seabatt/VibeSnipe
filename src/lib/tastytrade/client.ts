@@ -76,6 +76,15 @@ async function exchangeRefreshToken(
     bodyParams.client_secret = clientSecret;
   }
   
+  // Log request details for debugging (don't log sensitive values)
+  logger.info('OAuth2 token exchange request', {
+    url: `${baseUrl}/oauth/token`,
+    hasClientId: !!clientId,
+    hasBasicAuth: !!headers['Authorization'],
+    bodyParams: Object.keys(bodyParams),
+    env
+  });
+  
   const response = await fetch(`${baseUrl}/oauth/token`, {
     method: 'POST',
     headers,
