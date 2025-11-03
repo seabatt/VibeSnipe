@@ -60,11 +60,17 @@ async function exchangeRefreshToken(
     refresh_token: refreshToken,
   };
   
-  // Use Basic auth if client_id is available (OAuth2 RFC preferred method)
+  // Tastytrade OAuth2 might require client_id in body even with Basic auth
+  // Try both approaches for maximum compatibility
   if (clientId) {
+    // Include client_id in body (some OAuth2 servers require it)
+    bodyParams.client_id = clientId;
+    // Also use Basic auth for client authentication
     const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
     headers['Authorization'] = `Basic ${credentials}`;
-    // Don't include client_id/client_secret in body when using Basic auth
+    // Note: Some servers require client_secret in body, others don't
+    // We'll include it for compatibility
+    bodyParams.client_secret = clientSecret;
   } else {
     // Fallback: include client_secret in body when client_id is not available
     bodyParams.client_secret = clientSecret;
