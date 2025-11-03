@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Position } from '@/types';
 import { RiskGraph } from '../RiskGraph';
 
@@ -171,16 +171,7 @@ export function Positions() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchPositions();
-    
-    // Refresh positions every 30 seconds
-    const interval = setInterval(fetchPositions, 30000);
-    
-    return () => clearInterval(interval);
-  }, []);
-
-  const fetchPositions = async () => {
+  const fetchPositions = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -188,10 +179,12 @@ export function Positions() {
       const response = await fetch('/api/tastytrade/positions');
       
       if (!response.ok) {
-        throw new Error(`Failed to fetch positions: ${response.statusText}`);
+        const errorData = await response.json().catch(() => ({ error: response.statusText }));
+        throw new Error(errorData.error || errorData.details || `Failed to fetch positions: ${response.status} ${response.statusText}`);
       }
       
       const data = await response.json();
+      console.log('Positions API response:', data);
       setPositions(data.positions || []);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
@@ -200,7 +193,16 @@ export function Positions() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchPositions();
+    
+    // Refresh positions every 30 seconds
+    const interval = setInterval(fetchPositions, 30000);
+    
+    return () => clearInterval(interval);
+  }, [fetchPositions]);
 
   if (loading && positions.length === 0) {
     return (
