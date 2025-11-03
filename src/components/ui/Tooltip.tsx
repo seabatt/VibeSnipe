@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode, useState, useRef, useEffect } from 'react';
+import { ReactNode, useState, useRef, useEffect, useCallback } from 'react';
 
 interface TooltipProps {
   children: ReactNode;
@@ -14,7 +14,7 @@ export function Tooltip({ children, content, side = 'top' }: TooltipProps) {
   const triggerRef = useRef<HTMLDivElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
 
-  const updatePosition = () => {
+  const updatePosition = useCallback(() => {
     if (!triggerRef.current || !tooltipRef.current) return;
 
     const triggerRect = triggerRef.current.getBoundingClientRect();
@@ -43,7 +43,7 @@ export function Tooltip({ children, content, side = 'top' }: TooltipProps) {
     }
 
     setPosition({ top, left });
-  };
+  }, [side]);
 
   useEffect(() => {
     if (isVisible) {
@@ -55,7 +55,7 @@ export function Tooltip({ children, content, side = 'top' }: TooltipProps) {
         window.removeEventListener('resize', updatePosition);
       };
     }
-  }, [isVisible, side]);
+  }, [isVisible, side, updatePosition]);
 
   return (
     <>

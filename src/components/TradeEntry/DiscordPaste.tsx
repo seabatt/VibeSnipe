@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { AlertCircle, CheckCircle, Plus, Minus, ChevronUp, ChevronDown } from 'lucide-react';
 import { useOrders } from '@/stores/useOrders';
 import { useTokens } from '@/hooks/useTokens';
@@ -18,22 +18,7 @@ export function DiscordPaste() {
   const { setPendingOrder } = useOrders();
   const tokens = useTokens();
 
-  useEffect(() => {
-    const handlePaste = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'v') {
-        setTimeout(() => {
-          if (textareaRef.current?.value) {
-            handleParse(textareaRef.current.value);
-          }
-        }, 10);
-      }
-    };
-
-    window.addEventListener('keydown', handlePaste);
-    return () => window.removeEventListener('keydown', handlePaste);
-  }, []);
-
-  const handleParse = (input: string) => {
+  const handleParse = useCallback((input: string) => {
     setError(null);
     
     try {
@@ -74,9 +59,27 @@ export function DiscordPaste() {
       const tifMatch = input.match(/\b(LMT|MKT|DAY|GTC)\b/i);
       if (!tifMatch) incompleteTokens.push('tif');
 
-      if (underlying && direction && longStrike > 0 && limitPrice > 0) {
+      // Extract expiry date (e.g., "31 Oct 25" or "15 DEC 24")
+      const expiryMatch = input.match(/(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{2,4})/i);
+      let expiry: string;
+      if (expiryMatch) {
+        const day = parseInt(expiryMatch[1]);
+        const monthNames: { [key: string]: number } = {
+          jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+          jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
+        };
+        const month = monthNames[expiryMatch[2].toLowerCase()];
+        let year = parseInt(expiryMatch[3]);
+        if (year < 100) year += 2000; // Convert 2-digit to 4-digit year
+        const expiryDate = new Date(year, month, day);
+        expiry = expiryDate.toISOString().split('T')[0];
+      } else {
+        // Fallback to 0DTE (today's date) if no date specified
         const today = new Date();
-        const expiry = today.toISOString().split('T')[0];
+        expiry = today.toISOString().split('T')[0];
+      }
+
+      if (underlying && direction && longStrike > 0 && limitPrice > 0) {
 
         if (isButterfly && wingStrike) {
           legs.push(
@@ -126,7 +129,22 @@ export function DiscordPaste() {
       setError(err instanceof Error ? err.message : 'Parse error');
       setParsed(null);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    const handlePaste = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'v') {
+        setTimeout(() => {
+          if (textareaRef.current?.value) {
+            handleParse(textareaRef.current.value);
+          }
+        }, 10);
+      }
+    };
+
+    window.addEventListener('keydown', handlePaste);
+    return () => window.removeEventListener('keydown', handlePaste);
+  }, [handleParse]);
 
   const handlePriceNudge = (direction: number) => {
     if (!parsed) return;
