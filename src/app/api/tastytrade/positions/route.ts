@@ -82,17 +82,65 @@ export async function GET() {
     
     try {
       // Use the correct SDK method: getPositionsList
+      // Check if getPositionsList accepts additional parameters
+      // Some APIs require parameters like include_closed, fields, etc.
+      logger.info('Calling getPositionsList', { 
+        accountNumber,
+        method: 'getPositionsList',
+        service: 'balancesAndPositionsService',
+        // Log method signature to check available parameters
+        methodInfo: typeof balancesAndPositionsService.getPositionsList === 'function' ? 'function exists' : 'method not found'
+      });
+      
+      // Try calling with account number first
+      // If it fails or returns empty, we might need additional parameters
       response = await balancesAndPositionsService.getPositionsList(accountNumber);
+      
+      // If response is empty, log warning about potential missing parameters
+      if (!response || (response?.data?.items && response.data.items.length === 0) || (Array.isArray(response?.data) && response.data.length === 0)) {
+        logger.warn('Positions response is empty - may need additional parameters', {
+          accountNumber,
+          responseStructure: response ? Object.keys(response) : [],
+          note: 'Consider checking if getPositionsList needs parameters like include_closed, fields, etc.'
+        });
+      }
+      
+      // Log raw response structure for debugging
+      logger.info('Raw API response received', {
+        accountNumber,
+        responseType: typeof response,
+        responseIsNull: response === null,
+        responseIsUndefined: response === undefined,
+        responseKeys: response ? Object.keys(response) : [],
+        responseStringified: response ? JSON.stringify(response).substring(0, 500) : 'null',
+        hasData: response?.data !== undefined,
+        dataType: response?.data ? typeof response?.data : 'undefined',
+        dataKeys: response?.data ? Object.keys(response?.data) : [],
+        dataIsArray: Array.isArray(response?.data),
+        dataLength: Array.isArray(response?.data) ? response.data.length : 'not array',
+        hasItems: response?.data?.items !== undefined,
+        itemsIsArray: Array.isArray(response?.data?.items),
+        itemsLength: Array.isArray(response?.data?.items) ? response.data.items.length : 'not array',
+      });
       
       // Extract positions from response
       // Response structure: { data: { items: [...] } } or { data: [...] }
       positions = response?.data?.items || response?.data || response?.items || [];
       
+      logger.info('Positions extracted from response', {
+        accountNumber,
+        positionsType: typeof positions,
+        positionsIsArray: Array.isArray(positions),
+        positionsLength: Array.isArray(positions) ? positions.length : 'not array',
+        extractionPath: response?.data?.items ? 'data.items' : response?.data ? 'data' : response?.items ? 'items' : 'none',
+      });
+      
       logger.info('Positions fetched successfully', { 
         accountNumber, 
         count: positions.length,
         responseStructure: response ? Object.keys(response) : [],
-        samplePosition: positions.length > 0 ? Object.keys(positions[0]) : []
+        samplePosition: positions.length > 0 ? Object.keys(positions[0]) : [],
+        firstPositionPreview: positions.length > 0 ? JSON.stringify(positions[0]).substring(0, 300) : 'no positions'
       });
     } catch (apiError) {
       const errorMessage = apiError instanceof Error ? apiError.message : 'Unknown error';
