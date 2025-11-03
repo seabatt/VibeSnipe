@@ -32,6 +32,7 @@ let clientInstance: TastytradeSDK | null = null;
 async function exchangeRefreshToken(
   refreshToken: string,
   clientSecret: string,
+  clientId: string | undefined,
   env: 'prod' | 'sandbox'
 ): Promise<string> {
   const baseUrl = env === 'prod' 
@@ -39,20 +40,37 @@ async function exchangeRefreshToken(
     : 'https://api.cert.tastytrade.com';
   
   // OAuth2 token exchange endpoint
-  // According to Tastytrade API docs, refresh token flow requires:
+  // Tastytrade OAuth2 refresh token flow requires:
   // - grant_type: 'refresh_token'
   // - refresh_token: the refresh token
   // - client_secret: the client secret
+  // - client_id: optional but recommended
+  // Some OAuth2 implementations use Basic auth with client_id:client_secret
+  
+  const headers: HeadersInit = {
+    'Content-Type': 'application/x-www-form-urlencoded',
+  };
+  
+  // Add Basic auth header if client_id is available
+  if (clientId) {
+    const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+    headers['Authorization'] = `Basic ${credentials}`;
+  }
+  
+  const bodyParams: Record<string, string> = {
+    grant_type: 'refresh_token',
+    refresh_token: refreshToken,
+  };
+  
+  // Include client_secret in body if not using Basic auth
+  if (!clientId) {
+    bodyParams.client_secret = clientSecret;
+  }
+  
   const response = await fetch(`${baseUrl}/oauth/token`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: refreshToken,
-      client_secret: clientSecret,
-    }),
+    headers,
+    body: new URLSearchParams(bodyParams),
   });
 
   if (!response.ok) {
@@ -129,6 +147,7 @@ export async function getClient(): Promise<TastytradeSDK> {
       const accessToken = await exchangeRefreshToken(
         config.refreshToken,
         config.clientSecret,
+        config.clientId,
         config.env
       );
       
