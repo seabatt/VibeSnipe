@@ -110,27 +110,25 @@ export async function GET() {
     }
 
     // Step 3: Attempt OAuth2 token exchange with detailed logging
-    const headers: HeadersInit = {
-      'Content-Type': 'application/x-www-form-urlencoded',
-    };
-
-    // Try Basic auth first if clientId is available
-    if (config.clientId) {
-      headers['Authorization'] = `Basic ${Buffer.from(`${config.clientId}:${config.clientSecret}`).toString('base64')}`;
-    }
-
+    // Try body params method FIRST (matches Postman format that works)
     const bodyParams: Record<string, string> = {
       grant_type: 'refresh_token',
       refresh_token: config.refreshToken!,
     };
 
-    // Add client_id and client_secret to body if not using Basic auth
-    if (!config.clientId) {
+    // Add client_id and client_secret to body (body params method - matches Postman)
+    if (config.clientId) {
+      bodyParams.client_id = config.clientId;
       bodyParams.client_secret = config.clientSecret!;
     } else {
-      // If using Basic auth, still include client_id in body (some APIs require it)
-      bodyParams.client_id = config.clientId;
+      // No client_id available, use client_secret only
+      bodyParams.client_secret = config.clientSecret!;
     }
+
+    const headers: HeadersInit = {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'User-Agent': 'VibeSnipe/1.0', // Add User-Agent to avoid nginx/proxy blocking
+    };
 
     const requestBody = new URLSearchParams(bodyParams).toString();
     
@@ -140,7 +138,8 @@ export async function GET() {
       method: 'POST',
       headers: {
         'Content-Type': headers['Content-Type'],
-        'Authorization': config.clientId ? 'Basic [REDACTED]' : '[NOT SET]',
+        'User-Agent': headers['User-Agent'],
+        'Authorization': '[NOT SET]', // Body params method - no Basic Auth header
       },
       bodyParams: Object.keys(bodyParams),
       bodyLength: requestBody.length,
@@ -150,17 +149,51 @@ export async function GET() {
       url: oauthEndpoint,
       env: config.env,
       hasClientId: !!config.clientId,
-      authMethod: config.clientId ? 'basic_auth' : 'body_params',
+      authMethod: 'body_params', // Primary method - matches Postman
     });
 
     // Make the request
     const startTime = Date.now();
-    const response = await fetch(oauthEndpoint, {
+    let response = await fetch(oauthEndpoint, {
       method: 'POST',
       headers,
       body: requestBody,
       redirect: 'manual', // Don't follow redirects automatically - we'll handle them
     });
+    
+    // If body params method fails and we have clientId, try Basic Auth as fallback
+    if (!response.ok && config.clientId) {
+      logger.info('OAuth2 diagnostic test - body params failed, trying Basic Auth fallback', {
+        url: oauthEndpoint,
+        env: config.env,
+        status: response.status,
+      });
+      
+      // Try Basic Auth fallback
+      const basicAuthHeaders: HeadersInit = {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': `Basic ${Buffer.from(`${config.clientId}:${config.clientSecret!}`).toString('base64')}`,
+        'User-Agent': 'VibeSnipe/1.0',
+      };
+      
+      const basicAuthBodyParams: Record<string, string> = {
+        grant_type: 'refresh_token',
+        refresh_token: config.refreshToken!,
+      };
+      
+      const basicAuthRequestBody = new URLSearchParams(basicAuthBodyParams).toString();
+      
+      // Update diagnostics to show we tried fallback
+      diagnostics.requestDetails.headers['Authorization'] = 'Basic [REDACTED]';
+      diagnostics.requestDetails.triedMethods = ['body_params', 'basic_auth_header'];
+      
+      response = await fetch(oauthEndpoint, {
+        method: 'POST',
+        headers: basicAuthHeaders,
+        body: basicAuthRequestBody,
+        redirect: 'manual',
+      });
+    }
 
     const responseTime = Date.now() - startTime;
 

@@ -88,27 +88,166 @@ async function exchangeRefreshToken(
   // - client_id: optional but recommended
   // 
   // Try different authentication methods in order:
-  // 1. Basic auth header only (OAuth2 RFC preferred method)
-  // 2. Body params only (fallback if Basic auth fails)
+  // 1. Body params method FIRST (this works in Postman) - client_id and client_secret in body
+  // 2. Basic auth header (fallback if body params fails)
   
-  // Method 1: Try Basic auth header only (no client_id/client_secret in body)
+  const oauthUrl = `${baseUrl}/oauth/token`;
+  
+  // Method 1: Try body params method FIRST (matches Postman format that works)
+  // This includes client_id and client_secret in the body, no Authorization header
+  const bodyParams: Record<string, string> = {
+    grant_type: 'refresh_token',
+    refresh_token: refreshToken,
+  };
+  
   if (clientId) {
-    const headers: HeadersInit = {
+    bodyParams.client_id = clientId;
+    bodyParams.client_secret = clientSecret;
+  } else {
+    // No client_id available, use client_secret only
+    bodyParams.client_secret = clientSecret;
+  }
+  
+  const headers: HeadersInit = {
+    'Content-Type': 'application/x-www-form-urlencoded',
+    'User-Agent': 'VibeSnipe/1.0', // Add User-Agent to avoid nginx/proxy blocking
+  };
+  
+  logger.info('OAuth2 token exchange attempt: Body params (primary method - matches Postman)', {
+    url: oauthUrl,
+    method: 'body_params',
+    bodyParams: Object.keys(bodyParams),
+    env,
+    baseUrl,
+    urlValidation: {
+      isProd: env === 'prod',
+      expectedProd: 'https://api.tastytrade.com',
+      expectedSandbox: 'https://api.cert.tastytrade.com',
+      actualBaseUrl: baseUrl,
+      matchesExpected: (env === 'prod' && baseUrl === 'https://api.tastytrade.com') || 
+                       (env === 'sandbox' && baseUrl === 'https://api.cert.tastytrade.com'),
+    },
+    requestHeaders: {
+      'Content-Type': headers['Content-Type'],
+      'User-Agent': headers['User-Agent'],
+    },
+  });
+  
+  try {
+    const startTime = Date.now();
+    const response = await fetch(oauthUrl, {
+      method: 'POST',
+      headers,
+      body: new URLSearchParams(bodyParams),
+      redirect: 'manual', // Don't auto-follow redirects - we'll handle them
+    });
+    const responseTime = Date.now() - startTime;
+    
+    const contentType = response.headers.get('content-type') || '';
+    const location = response.headers.get('location');
+    const server = response.headers.get('server');
+    
+    // Check for redirects
+    if (response.status >= 300 && response.status < 400 && location) {
+      logger.warn('OAuth2 token exchange redirected', {
+        status: response.status,
+        redirectLocation: location,
+        finalUrl: location,
+        method: 'body_params',
+        env,
+        baseUrl,
+        message: 'Request was redirected - possible proxy/CDN interference',
+      });
+      // Fall through to try Basic Auth method
+    }
+
+    if (response.ok) {
+      const responseText = await response.text();
+      const isJson = contentType.includes('application/json') || responseText.trim().startsWith('{');
+      
+      if (!isJson) {
+        logger.error('OAuth2 response is not JSON', {
+          contentType,
+          responsePreview: responseText.substring(0, 200),
+          method: 'body_params',
+          env,
+        });
+        throw new Error('OAuth2 token exchange returned non-JSON response');
+      }
+      
+      const data = JSON.parse(responseText);
+      
+      if (!data.access_token) {
+        logger.error('OAuth2 response missing access_token', { response: data });
+        throw new Error('OAuth2 token exchange returned no access token');
+      }
+      
+      logger.info('OAuth2 token exchange successful (Body params method)', {
+        env,
+        responseTime: `${responseTime}ms`,
+        tokenLength: data.access_token?.length || 0,
+      });
+      return data.access_token;
+    } else {
+      const errorText = await response.text();
+      const isHtmlResponse = contentType.includes('text/html') || errorText.trim().startsWith('<');
+      const isJsonResponse = contentType.includes('application/json') || errorText.trim().startsWith('{');
+      
+      logger.warn('OAuth2 token exchange failed with body params method', {
+        status: response.status,
+        statusText: response.statusText,
+        method: 'body_params',
+        willTryFallback: clientId ? true : false,
+        responseTime: `${responseTime}ms`,
+        contentType,
+        isHtml: isHtmlResponse,
+        isJson: isJsonResponse,
+        server,
+        responsePreview: errorText.substring(0, 200),
+        responseHeaders: {
+          'content-type': contentType,
+          server,
+          location: location || undefined,
+        },
+      });
+      
+      // Fall through to try Basic Auth method if we have clientId
+      if (!clientId) {
+        // No fallback available, throw error
+        throw new Error('OAuth2 token exchange failed: No clientId available for Basic Auth fallback');
+      }
+    }
+  } catch (error) {
+    // If body params method failed and we have clientId, try Basic Auth as fallback
+    if (clientId && error instanceof Error && !error.message.includes('No clientId available')) {
+      logger.warn('OAuth2 token exchange error with body params method, trying Basic Auth fallback', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        method: 'body_params',
+        willTryFallback: true
+      });
+      // Fall through to try Basic Auth method
+    } else {
+      throw error;
+    }
+  }
+  
+  // Method 2: Fallback to Basic auth header (only if body params failed and we have clientId)
+  if (clientId) {
+    const basicAuthHeaders: HeadersInit = {
       'Content-Type': 'application/x-www-form-urlencoded',
       'Authorization': `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
+      'User-Agent': 'VibeSnipe/1.0', // Add User-Agent to avoid nginx/proxy blocking
     };
     
-    const bodyParams: Record<string, string> = {
+    const basicAuthBodyParams: Record<string, string> = {
       grant_type: 'refresh_token',
       refresh_token: refreshToken,
     };
     
-    const oauthUrl = `${baseUrl}/oauth/token`;
-    
-    logger.info('OAuth2 token exchange attempt: Basic auth only', {
+    logger.info('OAuth2 token exchange attempt: Basic auth (fallback method)', {
       url: oauthUrl,
       method: 'basic_auth_header',
-      bodyParams: Object.keys(bodyParams),
+      bodyParams: Object.keys(basicAuthBodyParams),
       env,
       baseUrl,
       urlValidation: {
@@ -120,8 +259,9 @@ async function exchangeRefreshToken(
                          (env === 'sandbox' && baseUrl === 'https://api.cert.tastytrade.com'),
       },
       requestHeaders: {
-        'Content-Type': headers['Content-Type'],
+        'Content-Type': basicAuthHeaders['Content-Type'],
         'Authorization': 'Basic [REDACTED]',
+        'User-Agent': basicAuthHeaders['User-Agent'],
       },
     });
     
@@ -129,8 +269,8 @@ async function exchangeRefreshToken(
       const startTime = Date.now();
       const response = await fetch(oauthUrl, {
         method: 'POST',
-        headers,
-        body: new URLSearchParams(bodyParams),
+        headers: basicAuthHeaders,
+        body: new URLSearchParams(basicAuthBodyParams),
         redirect: 'manual', // Don't auto-follow redirects - we'll handle them
       });
 
@@ -150,7 +290,6 @@ async function exchangeRefreshToken(
           baseUrl,
           message: 'Request was redirected - possible proxy/CDN interference',
         });
-        // Fall through to try body params method
       }
 
       if (response.ok) {
@@ -174,7 +313,7 @@ async function exchangeRefreshToken(
           throw new Error('OAuth2 token exchange returned no access token');
         }
         
-        logger.info('OAuth2 token exchange successful (Basic auth only)', {
+        logger.info('OAuth2 token exchange successful (Basic auth fallback)', {
           env,
           responseTime: `${responseTime}ms`,
           tokenLength: data.access_token?.length || 0,
@@ -185,11 +324,10 @@ async function exchangeRefreshToken(
         const isHtmlResponse = contentType.includes('text/html') || errorText.trim().startsWith('<');
         const isJsonResponse = contentType.includes('application/json') || errorText.trim().startsWith('{');
         
-        logger.warn('OAuth2 token exchange failed with Basic auth', {
+        logger.warn('OAuth2 token exchange failed with Basic auth (all methods exhausted)', {
           status: response.status,
           statusText: response.statusText,
           method: 'basic_auth_header',
-          willTryFallback: true,
           responseTime: `${responseTime}ms`,
           contentType,
           isHtml: isHtmlResponse,
@@ -203,258 +341,22 @@ async function exchangeRefreshToken(
           },
         });
         
-        // Fall through to try body params method
+        // Both methods failed, will throw error below
       }
     } catch (error) {
-      logger.warn('OAuth2 token exchange error with Basic auth', {
+      logger.warn('OAuth2 token exchange error with Basic auth (all methods exhausted)', {
         error: error instanceof Error ? error.message : 'Unknown error',
         method: 'basic_auth_header',
-        willTryFallback: true
       });
-      // Fall through to try body params method
-    }
-  }
-  
-  // Method 2: Fallback to body params only (no Basic auth header)
-  const headers: HeadersInit = {
-    'Content-Type': 'application/x-www-form-urlencoded',
-  };
-  
-  const bodyParams: Record<string, string> = {
-    grant_type: 'refresh_token',
-    refresh_token: refreshToken,
-  };
-  
-  const oauthUrl = `${baseUrl}/oauth/token`;
-  
-  if (clientId) {
-    bodyParams.client_id = clientId;
-    bodyParams.client_secret = clientSecret;
-    logger.info('OAuth2 token exchange attempt: Body params only', {
-      url: oauthUrl,
-      method: 'body_params',
-      bodyParams: Object.keys(bodyParams),
-      env,
-      baseUrl,
-      urlValidation: {
-        isProd: env === 'prod',
-        expectedProd: 'https://api.tastytrade.com',
-        expectedSandbox: 'https://api.cert.tastytrade.com',
-        actualBaseUrl: baseUrl,
-        matchesExpected: (env === 'prod' && baseUrl === 'https://api.tastytrade.com') || 
-                         (env === 'sandbox' && baseUrl === 'https://api.cert.tastytrade.com'),
-      },
-      requestHeaders: {
-        'Content-Type': headers['Content-Type'],
-      },
-    });
-  } else {
-    // No client_id available, use client_secret only
-    bodyParams.client_secret = clientSecret;
-    logger.info('OAuth2 token exchange attempt: Body params (client_secret only)', {
-      url: oauthUrl,
-      method: 'body_params',
-      bodyParams: Object.keys(bodyParams),
-      env,
-      baseUrl,
-      urlValidation: {
-        isProd: env === 'prod',
-        expectedProd: 'https://api.tastytrade.com',
-        expectedSandbox: 'https://api.cert.tastytrade.com',
-        actualBaseUrl: baseUrl,
-        matchesExpected: (env === 'prod' && baseUrl === 'https://api.tastytrade.com') || 
-                         (env === 'sandbox' && baseUrl === 'https://api.cert.tastytrade.com'),
-      },
-      requestHeaders: {
-        'Content-Type': headers['Content-Type'],
-      },
-    });
-  }
-  
-  const startTime = Date.now();
-  const response = await fetch(oauthUrl, {
-    method: 'POST',
-    headers,
-    body: new URLSearchParams(bodyParams),
-    redirect: 'manual', // Don't auto-follow redirects - we'll handle them
-  });
-  const responseTime = Date.now() - startTime;
-
-  // Get response details
-  const contentType = response.headers.get('content-type') || '';
-  const location = response.headers.get('location');
-  const server = response.headers.get('server');
-  
-  // Check for redirects
-  if (response.status >= 300 && response.status < 400 && location) {
-    logger.error('OAuth2 token exchange redirected', {
-      status: response.status,
-      redirectLocation: location,
-      finalUrl: location,
-      method: 'body_params',
-      env,
-      baseUrl,
-      oauthUrl,
-      message: 'Request was redirected - possible proxy/CDN interference',
-      urlValidation: {
-        redirectMatchesTastytrade: location.includes('tastytrade.com'),
-        expectedDomain: env === 'prod' ? 'api.tastytrade.com' : 'api.cert.tastytrade.com',
-      },
-    });
-  }
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    const isHtmlResponse = contentType.includes('text/html') || errorText.trim().startsWith('<');
-    const isJsonResponse = contentType.includes('application/json') || errorText.trim().startsWith('{');
-    
-    // Try to parse error as JSON if possible
-    let errorDetails = errorText;
-    let errorJson: any = null;
-    try {
-      errorJson = JSON.parse(errorText);
-      errorDetails = JSON.stringify(errorJson, null, 2);
-    } catch {
-      // Not JSON, use as-is (could be HTML response from nginx/proxy)
-    }
-    
-    // Extract HTML title if present
-    let htmlTitle: string | undefined;
-    if (isHtmlResponse) {
-      const titleMatch = errorText.match(/<title[^>]*>([^<]+)<\/title>/i);
-      htmlTitle = titleMatch ? titleMatch[1] : undefined;
-    }
-    
-    // Log detailed error information
-    logger.error('OAuth2 token exchange failed (all methods exhausted)', {
-      status: response.status,
-      statusText: response.statusText,
-      error: errorDetails.substring(0, 500), // Limit error details length
-      errorIsHtml: isHtmlResponse,
-      errorIsJson: isJsonResponse,
-      htmlTitle,
-      url: oauthUrl,
-      baseUrl,
-      responseTime: `${responseTime}ms`,
-      triedMethods: clientId ? ['basic_auth_header', 'body_params'] : ['body_params'],
-      env,
-      credentialPresence: {
-        hasClientId: !!clientId,
-        hasClientSecret: !!clientSecret,
-        hasRefreshToken: !!refreshToken,
-        clientIdLength: clientId?.length || 0,
-        clientSecretLength: clientSecret?.length || 0,
-        refreshTokenLength: refreshToken?.length || 0,
-      },
-      responseHeaders: {
-        contentType,
-        server,
-        location: location || undefined,
-      },
-      urlValidation: {
-        isProd: env === 'prod',
-        expectedProd: 'https://api.tastytrade.com',
-        expectedSandbox: 'https://api.cert.tastytrade.com',
-        actualBaseUrl: baseUrl,
-        matchesExpected: (env === 'prod' && baseUrl === 'https://api.tastytrade.com') || 
-                         (env === 'sandbox' && baseUrl === 'https://api.cert.tastytrade.com'),
-        oauthUrl,
-      },
-      redirectDetected: !!(location && response.status >= 300 && response.status < 400),
-    });
-    
-    // Provide actionable error message based on status code
-    let errorMessage = `OAuth2 token exchange failed: ${response.status} ${response.statusText}`;
-    
-    // Check for redirects first
-    if (response.status >= 300 && response.status < 400 && location) {
-      errorMessage += `\n\nRequest was redirected to: ${location}\n\n` +
-        'This indicates a proxy or CDN is intercepting the request before it reaches Tastytrade API.\n\n' +
-        'Possible causes:\n' +
-        '1. Vercel proxy/CDN configuration interfering with external API calls\n' +
-        '2. Wrong endpoint URL causing redirect\n' +
-        '3. Network routing issue\n\n' +
-        'Action steps:\n' +
-        '- Verify the redirect location matches expected Tastytrade domain\n' +
-        '- Check Vercel deployment settings for proxy configurations\n' +
-        '- Verify TASTYTRADE_ENV is set correctly (sandbox or prod)\n' +
-        '- Use diagnostic endpoint: /api/tastytrade/auth/test';
-    } else if (response.status === 401) {
-      // Check if error response is HTML (nginx/proxy issue)
-      const isHtmlResponse = contentType.includes('text/html') || errorText.trim().startsWith('<');
       
-      if (isHtmlResponse) {
-        errorMessage += '\n\nReceived HTML response (likely from nginx/proxy) - This suggests:\n' +
-          '1. Request is NOT reaching Tastytrade API (hitting proxy/CDN instead)\n' +
-          '2. Authentication credentials may not be reaching Tastytrade API\n' +
-          '3. Environment variable misconfiguration in Vercel\n' +
-          '4. Wrong endpoint URL or network routing issue\n\n' +
-          'Action steps:\n' +
-          '- Verify TASTYTRADE_ENV is set correctly (sandbox or prod)\n' +
-          '- Check that all credentials are set in Vercel environment variables\n' +
-          '- Verify credentials are not empty or whitespace-only\n' +
-          '- Ensure TASTYTRADE_CLIENT_SECRET and TASTYTRADE_REFRESH_TOKEN are set\n' +
-          '- TASTYTRADE_CLIENT_ID is optional but recommended\n' +
-          '- Check Vercel logs for credential validation errors\n' +
-          '- Verify credentials match your Tastytrade OAuth application\n' +
-          '- Use diagnostic endpoint: /api/tastytrade/auth/test';
-      } else {
-        errorMessage += '\n\nPossible causes:\n' +
-          '1. Invalid or expired refresh token - Regenerate refresh token in Tastytrade OAuth application\n' +
-          '2. Client ID/Secret mismatch - Verify TASTYTRADE_CLIENT_ID and TASTYTRADE_CLIENT_SECRET match your OAuth application\n' +
-          '3. Refresh token not associated with this OAuth application - Ensure refresh token was generated with the same Client ID/Secret\n' +
-          '4. Refresh token revoked or expired - Generate a new refresh token\n' +
-          '5. Wrong environment - Verify TASTYTRADE_ENV matches your credentials (sandbox vs prod)\n\n' +
-          'Action steps:\n' +
-          '- Verify credentials in Vercel match Tastytrade OAuth application\n' +
-          '- Check that TASTYTRADE_ENV is set correctly (sandbox or prod)\n' +
-          '- Regenerate refresh token if it expired\n' +
-          '- Check Tastytrade OAuth application settings at https://tastytrade.com/api/settings\n' +
-          '- Review Tastytrade OAuth2 documentation: https://developer.tastytrade.com';
-      }
-    } else if (response.status === 400) {
-      errorMessage += '\n\nPossible causes:\n' +
-        '1. Invalid request format - Check that grant_type=refresh_token is included\n' +
-        '2. Missing required parameters - Verify all required OAuth2 parameters are included\n' +
-        '3. Invalid refresh_token format\n\n' +
-        'Action steps:\n' +
-        '- Review request format and parameters\n' +
-        '- Check Tastytrade OAuth2 documentation for correct request format\n' +
-        '- Verify TASTYTRADE_REFRESH_TOKEN is a valid refresh token';
-    } else {
-      errorMessage += `\n\nError details: ${errorDetails.substring(0, 200)}`;
+      // Both methods failed - throw generic error (details already logged above)
+      throw new Error('OAuth2 token exchange failed: All authentication methods exhausted. Both body params and Basic Auth methods failed.');
     }
-    
-    throw new Error(errorMessage);
-  }
-
-  const responseText = await response.text();
-  const isJson = contentType.includes('application/json') || responseText.trim().startsWith('{');
-  
-  if (!isJson) {
-    logger.error('OAuth2 response is not JSON', {
-      contentType,
-      responsePreview: responseText.substring(0, 200),
-      method: 'body_params',
-      env,
-    });
-    throw new Error('OAuth2 token exchange returned non-JSON response');
   }
   
-  const data = JSON.parse(responseText);
-  
-  if (!data.access_token) {
-    logger.error('OAuth2 response missing access_token', { response: data });
-    throw new Error('OAuth2 token exchange returned no access token');
-  }
-  
-  logger.info('OAuth2 token exchange successful (body params method)', { 
-    method: clientId ? 'body_params' : 'body_params_client_secret_only',
-    env,
-    responseTime: `${responseTime}ms`,
-    tokenLength: data.access_token?.length || 0,
-  });
-  return data.access_token;
+  // If we reach here, both methods failed and we didn't have clientId
+  // Throw a generic error
+  throw new Error('OAuth2 token exchange failed: All authentication methods exhausted. No clientId available for Basic Auth fallback.');
 }
 
 /**
