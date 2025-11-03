@@ -57,10 +57,23 @@ async function exchangeRefreshToken(
 
   if (!response.ok) {
     const errorText = await response.text();
+    logger.error('OAuth2 token exchange failed', {
+      status: response.status,
+      statusText: response.statusText,
+      error: errorText,
+      url: `${baseUrl}/oauth/token`
+    });
     throw new Error(`OAuth2 token exchange failed: ${response.status} ${response.statusText} - ${errorText}`);
   }
 
   const data = await response.json();
+  
+  if (!data.access_token) {
+    logger.error('OAuth2 response missing access_token', { response: data });
+    throw new Error('OAuth2 token exchange returned no access token');
+  }
+  
+  logger.info('OAuth2 token exchange successful');
   return data.access_token;
 }
 

@@ -114,12 +114,21 @@ export async function GET() {
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    logger.error('Failed to fetch positions', undefined, error as Error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
     
+    logger.error('Failed to fetch positions', { 
+      error: errorMessage,
+      stack: errorStack
+    }, error as Error);
+    
+    // Return detailed error in development, generic in production
     return NextResponse.json(
       { 
         error: 'Failed to fetch positions',
-        ...(process.env.NODE_ENV === 'development' && { details: errorMessage })
+        ...(process.env.NODE_ENV === 'development' && { 
+          details: errorMessage,
+          stack: errorStack
+        })
       },
       { status: 500 }
     );

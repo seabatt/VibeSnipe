@@ -185,6 +185,11 @@ export function Positions() {
       
       const data = await response.json();
       console.log('Positions API response:', data);
+      
+      if (data.error) {
+        throw new Error(data.details || data.error || 'Failed to fetch positions');
+      }
+      
       setPositions(data.positions || []);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
