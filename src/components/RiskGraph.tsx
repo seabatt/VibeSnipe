@@ -64,7 +64,7 @@ export function RiskGraph() {
     ];
 
     // Add TP/SL bands
-    if (pendingOrder.ruleBundle) {
+    if (pendingOrder.ruleBundle && pendingOrder.ruleBundle.takeProfitPct != null && pendingOrder.ruleBundle.stopLossPct != null) {
       const tpLevel = maxGain * (pendingOrder.ruleBundle.takeProfitPct / 100);
       const slLevel = maxLoss * (pendingOrder.ruleBundle.stopLossPct / 100);
 

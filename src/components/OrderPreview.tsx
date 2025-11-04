@@ -102,8 +102,8 @@ export function OrderPreview() {
     });
 
     // Update rule bundle
-    setTpPct(pendingOrder.ruleBundle.takeProfitPct);
-    setSlPct(pendingOrder.ruleBundle.stopLossPct);
+    setTpPct(pendingOrder.ruleBundle.takeProfitPct ?? 50);
+    setSlPct(pendingOrder.ruleBundle.stopLossPct ?? 100);
     setTimeExit(pendingOrder.ruleBundle.timeExit || '');
     setUseTimeExit(!!pendingOrder.ruleBundle.timeExit);
   }, [pendingOrder, getQuote, setPendingOrder]);

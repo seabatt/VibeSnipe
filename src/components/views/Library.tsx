@@ -312,7 +312,7 @@ export function Library() {
                   border: `1px solid ${colors.semantic.profit}40`,
                   color: colors.semantic.profit,
                 }}>
-                  TP {template.ruleBundle.takeProfitPct}%
+                  TP {template.ruleBundle.takeProfitPct ?? '—'}%
                 </span>
                 <span style={{
                   padding: `${tokens.space.xs}px ${tokens.space.sm}px`,
@@ -322,7 +322,7 @@ export function Library() {
                   border: `1px solid ${colors.semantic.risk}40`,
                   color: colors.semantic.risk,
                 }}>
-                  SL {template.ruleBundle.stopLossPct}%
+                  SL {template.ruleBundle.stopLossPct ?? '—'}%
                 </span>
                 {template.ruleBundle.timeExit && (
                   <span style={{
