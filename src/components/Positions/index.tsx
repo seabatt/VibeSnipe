@@ -2,26 +2,44 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { Position } from '@/types';
+import { X, Target, StopCircle } from 'lucide-react';
 
-// Helper function to format strategy name for display
-function formatStrategyName(position: Position): string {
+// Design tokens matching Figma
+const TOKENS = {
+  space: { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 },
+  radius: { md: 12, lg: 16 },
+  type: { xs: 12, sm: 14, base: 16, lg: 18, xl: 24, xxl: 32 },
+  color: {
+    semantic: {
+      profit: '#82D895',
+      risk: '#EC612B',
+    }
+  }
+};
+
+// Helper function to extract symbol and strategy separately
+function getSymbolAndStrategy(position: Position): { symbol: string; strategy: string } {
   if (position.strategy === 'SPOT') {
-    return position.underlying;
+    return { symbol: position.underlying, strategy: '' };
   }
   
-  // For spreads, format as "SYMBOL STRIKE1/STRIKE2 Strategy"
+  // For spreads, extract strikes
   const strikes = position.legs
     .filter(leg => leg.strike > 0)
     .map(leg => leg.strike)
     .sort((a, b) => a - b);
   
   if (strikes.length === 0) {
-    return `${position.underlying} ${position.strategy}`;
+    return { symbol: position.underlying, strategy: position.strategy };
   }
   
   // For butterfly, show all strikes
   if (position.strategy === 'Butterfly' && strikes.length === 3) {
-    return `${position.underlying} ${strikes[0]}/${strikes[1]}/${strikes[2]} ${position.legs[0]?.right === 'CALL' ? 'Call' : 'Put'} ${position.strategy}`;
+    const callOrPut = position.legs[0]?.right === 'CALL' ? 'Call' : 'Put';
+    return {
+      symbol: position.underlying,
+      strategy: `${strikes[0]}/${strikes[1]}/${strikes[2]} ${callOrPut} ${position.strategy}`
+    };
   }
   
   // For vertical, show two strikes
@@ -29,28 +47,106 @@ function formatStrategyName(position: Position): string {
     const uniqueStrikes = [...new Set(strikes)];
     const callOrPut = position.legs[0]?.right === 'CALL' ? 'Call' : 'Put';
     if (uniqueStrikes.length === 2) {
-      return `${position.underlying} ${uniqueStrikes[0]}/${uniqueStrikes[1]} ${callOrPut} ${position.strategy}`;
+      return {
+        symbol: position.underlying,
+        strategy: `${uniqueStrikes[0]}/${uniqueStrikes[1]} ${callOrPut} ${position.strategy}`
+      };
     }
-    return `${position.underlying} ${uniqueStrikes[0]}/${uniqueStrikes[uniqueStrikes.length - 1]} ${callOrPut} ${position.strategy}`;
+    return {
+      symbol: position.underlying,
+      strategy: `${uniqueStrikes[0]}/${uniqueStrikes[uniqueStrikes.length - 1]} ${callOrPut} ${position.strategy}`
+    };
   }
   
-  return `${position.underlying} ${position.strategy}`;
+  return { symbol: position.underlying, strategy: position.strategy };
 }
 
 // Helper function to determine state (Profit, Risk, Neutral)
-function getPositionState(position: Position): 'Profit' | 'Risk' | 'Neutral' {
-  if (position.pnl > 0) return 'Profit';
-  if (position.pnl < 0) return 'Risk';
-  return 'Neutral';
+function getPositionState(position: Position): 'profit' | 'risk' | 'neutral' {
+  if (position.pnl > 0) return 'profit';
+  if (position.pnl < 0) return 'risk';
+  return 'neutral';
 }
 
-function PositionRow({ position }: { position: Position }) {
+// P/L Ring component matching Figma (28x28px, 10px radius)
+function PLRing({ percent }: { percent: number }) {
+  const isProfit = percent >= 0;
+  const absPercent = Math.min(Math.abs(percent), 100);
+  const circumference = 2 * Math.PI * 10;
+  const offset = circumference - (absPercent / 100) * circumference;
+
+  return (
+    <svg width="28" height="28">
+      <circle
+        cx="14"
+        cy="14"
+        r="10"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        className="text-border-dark dark:text-border-dark"
+      />
+      <circle
+        cx="14"
+        cy="14"
+        r="10"
+        fill="none"
+        stroke={isProfit ? TOKENS.color.semantic.profit : TOKENS.color.semantic.risk}
+        strokeWidth="2"
+        strokeDasharray={circumference}
+        strokeDashoffset={offset}
+        transform="rotate(-90 14 14)"
+      />
+    </svg>
+  );
+}
+
+// MiniCurve component matching Figma (40x16px polyline)
+function MiniCurve({ data }: { data: number[] }) {
+  if (!data || data.length === 0) {
+    // Generate simple curve from P/L direction
+    const isProfit = data && data.length > 0 ? data[data.length - 1] > data[0] : false;
+    return (
+      <svg width="40" height="16" style={{ display: 'block' }}>
+        <polyline
+          points={isProfit ? "0,12 8,8 16,6 24,4 32,4 40,4" : "0,4 8,6 16,8 24,10 32,12 40,12"}
+          fill="none"
+          stroke={isProfit ? TOKENS.color.semantic.profit : TOKENS.color.semantic.risk}
+          strokeWidth="1.5"
+        />
+      </svg>
+    );
+  }
+  
+  const max = Math.max(...data);
+  const min = Math.min(...data);
+  const range = max - min || 1;
+  
+  const points = data.map((value, i) => {
+    const x = (i / (data.length - 1)) * 40;
+    const y = 16 - ((value - min) / range) * 12;
+    return `${x},${y}`;
+  }).join(' ');
+
+  return (
+    <svg width="40" height="16" style={{ display: 'block' }}>
+      <polyline
+        points={points}
+        fill="none"
+        stroke={data[data.length - 1] > data[0] ? TOKENS.color.semantic.profit : TOKENS.color.semantic.risk}
+        strokeWidth="1.5"
+      />
+    </svg>
+  );
+}
+
+function PositionRow({ position, index, total }: { position: Position; index: number; total: number }) {
   const pnlPercent = position.avgPrice > 0 && position.qty > 0 
     ? (position.pnl / (position.avgPrice * position.qty * (position.strategy === 'SPOT' ? 1 : 100))) * 100 
     : 0;
   
   const state = getPositionState(position);
-  const strategyName = formatStrategyName(position);
+  const { symbol, strategy } = getSymbolAndStrategy(position);
 
   const handleClose = () => {
     // TODO: Implement position closing via API
@@ -67,139 +163,247 @@ function PositionRow({ position }: { position: Position }) {
     console.log('Stop Loss:', position.id);
   };
 
-  const pnlColor = position.pnl >= 0 ? 'text-profit' : 'text-risk';
-  const stateColor = state === 'Profit' ? 'bg-profit/20 text-profit' : 
-                     state === 'Risk' ? 'bg-risk/20 text-risk' : 
-                     'bg-text-secondary-dark/20 text-text-secondary-dark';
+  // Calculate TP/SL progress using Figma formula
+  // TP: ((current - entry) / (target - entry)) * 100
+  // SL: ((entry - current) / (entry - stop)) * 100
+  // For now, use simplified calculation based on P/L
+  const currentPrice = position.avgPrice + (position.pnl / (position.qty * (position.strategy === 'SPOT' ? 1 : 100)));
+  const targetPrice = position.avgPrice * (1 + position.ruleBundle.takeProfitPct / 100);
+  const stopPrice = position.avgPrice * (1 - position.ruleBundle.stopLossPct / 100);
   
-  // Calculate TP/SL progress (simplified - would need actual price targets)
-  const tpProgress = position.pnl > 0 ? Math.min(100, (position.pnl / (position.avgPrice * position.qty * 0.5)) * 100) : 0;
-  const slProgress = position.pnl < 0 ? Math.min(100, Math.abs(position.pnl / (position.avgPrice * position.qty))) * 100 : 0;
+  const tpProgress = position.pnl > 0 && targetPrice > position.avgPrice
+    ? Math.max(0, Math.min(100, ((currentPrice - position.avgPrice) / (targetPrice - position.avgPrice)) * 100))
+    : 0;
+  
+  const slProgress = position.pnl < 0 && stopPrice < position.avgPrice
+    ? Math.max(0, Math.min(100, ((position.avgPrice - currentPrice) / (position.avgPrice - stopPrice)) * 100))
+    : 0;
+
+  // Generate curve data (simplified - would need actual historical data)
+  const curveData = position.pnl >= 0 
+    ? [position.avgPrice * 0.9, position.avgPrice * 0.92, position.avgPrice * 0.95, position.avgPrice * 0.97, position.avgPrice * 0.99, currentPrice, currentPrice]
+    : [position.avgPrice * 1.1, position.avgPrice * 1.08, position.avgPrice * 1.05, position.avgPrice * 1.03, position.avgPrice * 1.01, currentPrice, currentPrice];
 
   return (
-    <tr className="border-b border-border-dark dark:border-border-dark hover:bg-surface-dark/50 transition-colors">
-      {/* SYMBOL / STRATEGY */}
-      <td className="px-16 py-12">
-        <div className="text-sm font-medium text-text-primary-dark dark:text-text-primary-dark">
-          {strategyName}
+    <div
+      className={`grid items-center transition-colors ${index < total - 1 ? 'border-b border-border-dark dark:border-border-dark' : ''}`}
+      style={{
+        gridTemplateColumns: '2fr 0.6fr 1fr 0.8fr 1.2fr 0.8fr 0.6fr 2fr',
+        padding: `${TOKENS.space.md}px ${TOKENS.space.lg}px`,
+        gap: `${TOKENS.space.lg}px`,
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.backgroundColor = 'rgba(35, 39, 52, 0.4)'; // border + 40 opacity
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.backgroundColor = 'transparent';
+      }}
+    >
+      {/* Symbol/Strategy */}
+      <div>
+        <div 
+          className="text-text-primary-dark dark:text-text-primary-dark"
+          style={{ 
+            fontSize: `${TOKENS.type.sm}px`,
+            marginBottom: '2px',
+          }}
+        >
+          {symbol}
         </div>
-      </td>
-      
-      {/* QTY */}
-      <td className="px-16 py-12 text-sm text-text-primary-dark dark:text-text-primary-dark tabular-nums">
+        {strategy && (
+          <div 
+            className="text-text-secondary-dark dark:text-text-secondary-dark"
+            style={{ 
+              fontSize: `${TOKENS.type.xs}px`,
+            }}
+          >
+            {strategy}
+          </div>
+        )}
+      </div>
+
+      {/* Qty */}
+      <div 
+        className="text-text-primary-dark dark:text-text-primary-dark tabular-nums"
+        style={{ 
+          fontSize: `${TOKENS.type.sm}px`,
+        }}
+      >
         {position.qty}
-      </td>
-      
-      {/* ENTRY */}
-      <td className="px-16 py-12 text-sm text-text-primary-dark dark:text-text-primary-dark tabular-nums">
+      </div>
+
+      {/* Entry */}
+      <div 
+        className="text-text-primary-dark dark:text-text-primary-dark tabular-nums"
+        style={{ 
+          fontSize: `${TOKENS.type.sm}px`,
+        }}
+      >
         ${position.avgPrice.toFixed(2)}
-      </td>
-      
+      </div>
+
       {/* P/L */}
-      <td className="px-16 py-12">
-        <div className="flex items-center gap-8">
-          <div className={`text-sm font-medium tabular-nums ${pnlColor}`}>
+      <div className="flex items-center gap-2">
+        <PLRing percent={pnlPercent} />
+        <div>
+          <div 
+            className="tabular-nums"
+            style={{ 
+              fontSize: `${TOKENS.type.sm}px`,
+              color: position.pnl >= 0 ? TOKENS.color.semantic.profit : TOKENS.color.semantic.risk,
+            }}
+          >
             {position.pnl >= 0 ? '+' : ''}${position.pnl.toFixed(2)}
           </div>
-          <div className={`text-xs tabular-nums ${pnlColor}`}>
-            ({pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(1)}%)
-          </div>
-          {/* P/L Ring Icon */}
-          <div className="relative w-12 h-12">
-            <svg className="w-12 h-12 transform -rotate-90">
-              <circle
-                cx="16"
-                cy="16"
-                r="12"
-                stroke="currentColor"
-                strokeWidth="2"
-                fill="none"
-                className="text-border-dark dark:text-border-dark opacity-30"
-              />
-              <circle
-                cx="16"
-                cy="16"
-                r="12"
-                stroke="currentColor"
-                strokeWidth="2"
-                fill="none"
-                strokeDasharray={`${Math.abs(pnlPercent) * 0.75} 75`}
-                className={pnlColor}
-              />
-            </svg>
-          </div>
-        </div>
-      </td>
-      
-      {/* TP / SL */}
-      <td className="px-16 py-12">
-        <div className="space-y-4">
-          {/* TP Bar */}
-          <div className="h-2 bg-border-dark dark:bg-border-dark rounded-full overflow-hidden">
-            <div
-              className="h-full bg-profit transition-all duration-200"
-              style={{ width: `${Math.max(0, Math.min(100, tpProgress))}%` }}
-            />
-          </div>
-          {/* SL Bar */}
-          <div className="h-2 bg-border-dark dark:bg-border-dark rounded-full overflow-hidden">
-            <div
-              className="h-full bg-risk transition-all duration-200"
-              style={{ width: `${Math.max(0, Math.min(100, slProgress))}%` }}
-            />
-          </div>
-        </div>
-      </td>
-      
-      {/* STATE */}
-      <td className="px-16 py-12">
-        <div className={`px-8 py-4 rounded-full text-xs font-medium text-center ${stateColor}`}>
-          {state}
-        </div>
-      </td>
-      
-      {/* CURVE */}
-      <td className="px-16 py-12">
-        <div className="w-32 h-16 flex items-center">
-          {/* Simple curve visualization */}
-          <svg className="w-full h-full" viewBox="0 0 32 16" preserveAspectRatio="none">
-            <path
-              d={position.pnl >= 0 
-                ? "M 0,12 Q 8,4 16,8 T 32,4"
-                : "M 0,4 Q 8,12 16,8 T 32,12"
-              }
-              stroke={position.pnl >= 0 ? '#10b981' : '#f59e0b'}
-              strokeWidth="1.5"
-              fill="none"
-            />
-          </svg>
-        </div>
-      </td>
-      
-      {/* ACTIONS */}
-      <td className="px-16 py-12">
-        <div className="flex items-center gap-4">
-          <button
-            onClick={handleClose}
-            className="px-8 py-4 text-xs font-medium text-text-secondary-dark dark:text-text-secondary-dark hover:text-text-primary-dark dark:hover:text-text-primary-dark transition-colors"
+          <div 
+            className="text-text-secondary-dark dark:text-text-secondary-dark tabular-nums"
+            style={{ 
+              fontSize: `${TOKENS.type.xs}px`,
+            }}
           >
-            Close
-          </button>
-          <button
-            onClick={handleTP}
-            className="px-8 py-4 text-xs font-medium text-text-secondary-dark dark:text-text-secondary-dark hover:text-text-primary-dark dark:hover:text-text-primary-dark transition-colors"
+            {pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(1)}%
+          </div>
+        </div>
+      </div>
+
+      {/* TP/SL Bars */}
+      <div className="flex flex-col gap-1">
+        {/* TP Bar */}
+        <div className="flex items-center gap-1">
+          <span 
+            className="text-text-secondary-dark dark:text-text-secondary-dark"
+            style={{ 
+              fontSize: `${TOKENS.type.xs}px`,
+              width: '20px',
+            }}
           >
             TP
-          </button>
-          <button
-            onClick={handleSL}
-            className="px-8 py-4 text-xs font-medium text-text-secondary-dark dark:text-text-secondary-dark hover:text-text-primary-dark dark:hover:text-text-primary-dark transition-colors"
+          </span>
+          <div 
+            className="bg-border-dark dark:bg-border-dark rounded-sm relative overflow-hidden"
+            style={{ 
+              flex: 1,
+              height: '4px',
+              borderRadius: '2px',
+            }}
+          >
+            <div 
+              className="bg-profit transition-all duration-200"
+              style={{ 
+                position: 'absolute',
+                left: 0,
+                top: 0,
+                bottom: 0,
+                width: `${Math.max(0, Math.min(100, tpProgress))}%`,
+                borderRadius: '2px',
+              }}
+            />
+          </div>
+        </div>
+        {/* SL Bar */}
+        <div className="flex items-center gap-1">
+          <span 
+            className="text-text-secondary-dark dark:text-text-secondary-dark"
+            style={{ 
+              fontSize: `${TOKENS.type.xs}px`,
+              width: '20px',
+            }}
           >
             SL
-          </button>
+          </span>
+          <div 
+            className="bg-border-dark dark:bg-border-dark rounded-sm relative overflow-hidden"
+            style={{ 
+              flex: 1,
+              height: '4px',
+              borderRadius: '2px',
+            }}
+          >
+            <div 
+              className="bg-risk transition-all duration-200"
+              style={{ 
+                position: 'absolute',
+                left: 0,
+                top: 0,
+                bottom: 0,
+                width: `${Math.max(0, Math.min(100, slProgress))}%`,
+                borderRadius: '2px',
+              }}
+            />
+          </div>
         </div>
-      </td>
-    </tr>
+      </div>
+
+      {/* State Chip */}
+      <div>
+        <span 
+          className="inline-block text-center tabular-nums"
+          style={{ 
+            padding: `${TOKENS.space.xs}px ${TOKENS.space.sm}px`,
+            borderRadius: `${TOKENS.space.lg}px`,
+            fontSize: `${TOKENS.type.xs}px`,
+            backgroundColor: state === 'profit' 
+              ? TOKENS.color.semantic.profit + '15'
+              : state === 'risk'
+                ? TOKENS.color.semantic.risk + '15'
+                : 'rgba(35, 39, 52, 1)', // border color
+            border: `1px solid ${state === 'profit' 
+              ? TOKENS.color.semantic.profit + '40'
+              : state === 'risk'
+                ? TOKENS.color.semantic.risk + '40'
+                : 'rgba(35, 39, 52, 1)'}`,
+            color: state === 'profit' 
+              ? TOKENS.color.semantic.profit
+              : state === 'risk'
+                ? TOKENS.color.semantic.risk
+                : 'rgb(169, 175, 195)', // textSecondary
+          }}
+        >
+          {state === 'profit' ? 'Profit' : state === 'risk' ? 'Risk' : 'Neutral'}
+        </span>
+      </div>
+
+      {/* Mini Curve */}
+      <div>
+        <MiniCurve data={curveData} />
+      </div>
+
+      {/* Actions */}
+      <div 
+        className="flex gap-1 justify-end"
+      >
+        <button
+          onClick={handleClose}
+          className="flex items-center gap-1 px-2 py-1 text-text-primary-dark dark:text-text-primary-dark hover:text-text-primary-dark dark:hover:text-text-primary-dark transition-colors border border-border-dark dark:border-border-dark rounded-sm bg-transparent"
+          style={{
+            fontSize: `${TOKENS.type.xs}px`,
+          }}
+        >
+          <X className="w-3 h-3" />
+          Close
+        </button>
+        <button
+          onClick={handleTP}
+          className="flex items-center gap-1 px-2 py-1 text-text-primary-dark dark:text-text-primary-dark hover:text-text-primary-dark dark:hover:text-text-primary-dark transition-colors border border-border-dark dark:border-border-dark rounded-sm bg-transparent"
+          style={{
+            fontSize: `${TOKENS.type.xs}px`,
+          }}
+        >
+          <Target className="w-3 h-3" />
+          TP
+        </button>
+        <button
+          onClick={handleSL}
+          className="flex items-center gap-1 px-2 py-1 text-text-primary-dark dark:text-text-primary-dark hover:text-text-primary-dark dark:hover:text-text-primary-dark transition-colors border border-border-dark dark:border-border-dark rounded-sm bg-transparent"
+          style={{
+            fontSize: `${TOKENS.type.xs}px`,
+          }}
+        >
+          <StopCircle className="w-3 h-3" />
+          SL
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -330,64 +534,63 @@ export function Positions() {
   }
 
   return (
-    <div className="space-y-12">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-text-primary-dark dark:text-text-primary-dark">
+    <div>
+      <div 
+        className="flex items-center justify-between mb-4"
+      >
+        <h2 
+          className="text-text-primary-dark dark:text-text-primary-dark"
+          style={{ 
+            fontSize: `${TOKENS.type.lg}px`,
+          }}
+        >
           Open Positions
         </h2>
-        <div className="flex items-center gap-8">
-          <span className="text-sm text-text-secondary-dark dark:text-text-secondary-dark">
-            {positions.length} active
-          </span>
-          <button
-            onClick={fetchPositions}
-            disabled={loading}
-            className="text-xs text-text-secondary-dark dark:text-text-secondary-dark hover:text-text-primary-dark dark:hover:text-text-primary-dark transition-colors disabled:opacity-50"
-          >
-            {loading ? 'Refreshing...' : 'Refresh'}
-          </button>
-        </div>
+        <span 
+          className="text-text-secondary-dark dark:text-text-secondary-dark"
+          style={{ 
+            fontSize: `${TOKENS.type.xs}px`,
+          }}
+        >
+          {positions.length} active
+        </span>
       </div>
-      
-      {/* Table */}
-      <div className="bg-surface-dark dark:bg-surface-dark border border-border-dark dark:border-border-dark rounded-12 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border-dark dark:border-border-dark bg-surface-dark/50">
-                <th className="px-16 py-12 text-left text-xs font-medium text-text-secondary-dark dark:text-text-secondary-dark uppercase tracking-wider">
-                  SYMBOL / STRATEGY
-                </th>
-                <th className="px-16 py-12 text-left text-xs font-medium text-text-secondary-dark dark:text-text-secondary-dark uppercase tracking-wider">
-                  QTY
-                </th>
-                <th className="px-16 py-12 text-left text-xs font-medium text-text-secondary-dark dark:text-text-secondary-dark uppercase tracking-wider">
-                  ENTRY
-                </th>
-                <th className="px-16 py-12 text-left text-xs font-medium text-text-secondary-dark dark:text-text-secondary-dark uppercase tracking-wider">
-                  P/L
-                </th>
-                <th className="px-16 py-12 text-left text-xs font-medium text-text-secondary-dark dark:text-text-secondary-dark uppercase tracking-wider">
-                  TP / SL
-                </th>
-                <th className="px-16 py-12 text-left text-xs font-medium text-text-secondary-dark dark:text-text-secondary-dark uppercase tracking-wider">
-                  STATE
-                </th>
-                <th className="px-16 py-12 text-left text-xs font-medium text-text-secondary-dark dark:text-text-secondary-dark uppercase tracking-wider">
-                  CURVE
-                </th>
-                <th className="px-16 py-12 text-left text-xs font-medium text-text-secondary-dark dark:text-text-secondary-dark uppercase tracking-wider">
-                  ACTIONS
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {positions.map((position) => (
-                <PositionRow key={position.id} position={position} />
-              ))}
-            </tbody>
-          </table>
+
+      {/* Desktop Table View - CSS Grid */}
+      <div 
+        className="bg-surface-dark dark:bg-surface-dark border border-border-dark dark:border-border-dark rounded-12 overflow-hidden"
+      >
+        {/* Header */}
+        <div 
+          className="grid gap-4 border-b border-border-dark dark:border-border-dark bg-surface-dark/50"
+          style={{
+            gridTemplateColumns: '2fr 0.6fr 1fr 0.8fr 1.2fr 0.8fr 0.6fr 2fr',
+            padding: `${TOKENS.space.md}px ${TOKENS.space.lg}px`,
+            fontSize: `${TOKENS.type.xs}px`,
+            color: 'rgb(169, 175, 195)', // textSecondary
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
+          }}
+        >
+          <div>Symbol / Strategy</div>
+          <div>Qty</div>
+          <div>Entry</div>
+          <div>P/L</div>
+          <div>TP / SL</div>
+          <div>State</div>
+          <div>Curve</div>
+          <div style={{ textAlign: 'right' }}>Actions</div>
         </div>
+
+        {/* Rows */}
+        {positions.map((position, index) => (
+          <PositionRow 
+            key={position.id} 
+            position={position} 
+            index={index}
+            total={positions.length}
+          />
+        ))}
       </div>
     </div>
   );
