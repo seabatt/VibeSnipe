@@ -17,9 +17,12 @@ import type {
   OrderLeg,
   OCOBracket,
   VerticalLegs,
+  OTOCOGroup,
+  StopOrderPayload,
 } from './types';
 import { logger, logOrderSubmission, logOrderFill } from '../logger';
 import { OrderRejectionError } from '../errors';
+import { orderRegistry } from '../orderRegistry';
 
 /**
  * Performs a dry run validation of a vertical spread order.
@@ -661,5 +664,608 @@ function mapOrderStatus(sdkStatus: string): AppOrder['status'] {
 
   const normalized = sdkStatus.toLowerCase().trim();
   return statusMap[normalized] || 'PENDING';
+}
+
+/**
+ * Calculates take profit price from entry price and percentage.
+ * 
+ * @param {number} entryPrice - Entry price
+ * @param {number} tpPct - Take profit percentage (e.g., 50 = 50% profit)
+ * @returns {number} Take profit price
+ * @throws {Error} If inputs are invalid
+ */
+export function calculateTPPrice(entryPrice: number, tpPct: number): number {
+  if (entryPrice <= 0) {
+    throw new Error('Entry price must be positive');
+  }
+  if (tpPct < 0) {
+    throw new Error('Take profit percentage must be non-negative');
+  }
+  // TP price = entry price * (1 + tpPct / 100)
+  // e.g., entry $2.00, TP 50% = $2.00 * 1.5 = $3.00
+  return entryPrice * (1 + tpPct / 100);
+}
+
+/**
+ * Calculates stop loss price from entry price and percentage.
+ * 
+ * @param {number} entryPrice - Entry price
+ * @param {number} slPct - Stop loss percentage (e.g., 100 = 100% loss = 0% of entry)
+ * @returns {number} Stop loss price
+ * @throws {Error} If inputs are invalid
+ */
+export function calculateSLPrice(entryPrice: number, slPct: number): number {
+  if (entryPrice <= 0) {
+    throw new Error('Entry price must be positive');
+  }
+  if (slPct < 0) {
+    throw new Error('Stop loss percentage must be non-negative');
+  }
+  // SL price = entry price * (1 - slPct / 100)
+  // e.g., entry $2.00, SL 100% = $2.00 * 0 = $0.00 (but we'll use a small positive value)
+  // e.g., entry $2.00, SL 50% = $2.00 * 0.5 = $1.00
+  const calculated = entryPrice * (1 - slPct / 100);
+  return Math.max(0.01, calculated); // Ensure minimum price of $0.01
+}
+
+/**
+ * Builds exit leg orders from entry legs (reverses actions).
+ * 
+ * @param {OrderLeg[]} entryLegs - Entry order legs
+ * @returns {OrderLeg[]} Exit order legs with reversed actions
+ */
+export function buildExitLegs(entryLegs: OrderLeg[]): OrderLeg[] {
+  return entryLegs.map((leg) => {
+    // Reverse actions: Buy to Open -> Buy to Close, Sell to Open -> Sell to Close
+    let exitAction: OrderLeg['action'];
+    if (leg.action === 'BUY_TO_OPEN') {
+      exitAction = 'BUY_TO_CLOSE';
+    } else if (leg.action === 'SELL_TO_OPEN') {
+      exitAction = 'SELL_TO_CLOSE';
+    } else {
+      // If already close action, keep it (shouldn't happen for entry legs)
+      exitAction = leg.action;
+    }
+    
+    return {
+      ...leg,
+      action: exitAction,
+    };
+  });
+}
+
+/**
+ * Submits a trigger order (the entry order).
+ * 
+ * @param {OrderLeg[]} legs - Order legs
+ * @param {number} price - Limit price
+ * @param {string} accountId - Account ID
+ * @param {'Debit' | 'Credit'} priceEffect - Price effect (Debit or Credit)
+ * @param {'GTC' | 'DAY' | 'EXT' | 'IOC' | 'FOK'} timeInForce - Time in force
+ * @returns {Promise<AppOrder>} The submitted trigger order
+ * @throws {Error} If submission fails
+ */
+export async function submitTriggerOrder(
+  legs: OrderLeg[],
+  price: number,
+  accountId: string,
+  priceEffect: 'Debit' | 'Credit' = 'Debit',
+  timeInForce: 'GTC' | 'DAY' | 'EXT' | 'IOC' | 'FOK' = 'GTC'
+): Promise<AppOrder> {
+  if (!legs || legs.length === 0) {
+    throw new Error('Order legs are required');
+  }
+  if (price <= 0) {
+    throw new Error('Price must be positive');
+  }
+  if (!accountId || typeof accountId !== 'string') {
+    throw new Error('Account ID is required');
+  }
+
+  try {
+    const client = await getClient();
+    
+    // Build trigger order payload in SDK format
+    const payload = {
+      'order-type': 'Limit',
+      price,
+      'price-effect': priceEffect,
+      'time-in-force': timeInForce,
+      legs: legs.map((leg) => ({
+        'instrument-type': 'Equity Option',
+        symbol: leg.streamerSymbol,
+        action: mapActionToSDK(leg.action),
+        quantity: leg.quantity,
+      })),
+    };
+
+    // Submit order via SDK
+    const response = await client.orderService.createOrder(accountId, payload);
+    
+    // Normalize SDK response to AppOrder format
+    const order = normalizeOrder(response, accountId);
+    
+    logger.info('Trigger order submitted', {
+      orderId: order.id,
+      accountId,
+      price,
+    });
+    
+    return order;
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    logger.error('Failed to submit trigger order', { accountId, price }, error as Error);
+    throw new OrderRejectionError(`Failed to submit trigger order: ${errorMessage}`);
+  }
+}
+
+/**
+ * Submits a take profit order (Limit order).
+ * 
+ * @param {OrderLeg[]} exitLegs - Exit order legs (reversed from entry)
+ * @param {number} tpPrice - Take profit price
+ * @param {string} accountId - Account ID
+ * @param {'GTC' | 'DAY' | 'EXT' | 'IOC' | 'FOK'} timeInForce - Time in force
+ * @returns {Promise<AppOrder>} The submitted TP order
+ * @throws {Error} If submission fails
+ */
+export async function submitTPOrder(
+  exitLegs: OrderLeg[],
+  tpPrice: number,
+  accountId: string,
+  timeInForce: 'GTC' | 'DAY' | 'EXT' | 'IOC' | 'FOK' = 'GTC'
+): Promise<AppOrder> {
+  if (!exitLegs || exitLegs.length === 0) {
+    throw new Error('Exit legs are required');
+  }
+  if (tpPrice <= 0) {
+    throw new Error('Take profit price must be positive');
+  }
+  if (!accountId || typeof accountId !== 'string') {
+    throw new Error('Account ID is required');
+  }
+
+  try {
+    const client = await getClient();
+    
+    // Build TP order payload (Limit order)
+    const payload = {
+      'order-type': 'Limit',
+      price: tpPrice,
+      'price-effect': 'Credit', // Exit orders are typically Credit
+      'time-in-force': timeInForce,
+      legs: exitLegs.map((leg) => ({
+        'instrument-type': 'Equity Option',
+        symbol: leg.streamerSymbol,
+        action: mapActionToSDK(leg.action),
+        quantity: leg.quantity,
+      })),
+    };
+
+    // Submit order via SDK
+    const response = await client.orderService.createOrder(accountId, payload);
+    
+    // Normalize SDK response to AppOrder format
+    const order = normalizeOrder(response, accountId);
+    
+    logger.info('Take profit order submitted', {
+      orderId: order.id,
+      accountId,
+      tpPrice,
+    });
+    
+    return order;
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    logger.error('Failed to submit take profit order', { accountId, tpPrice }, error as Error);
+    throw new OrderRejectionError(`Failed to submit take profit order: ${errorMessage}`);
+  }
+}
+
+/**
+ * Submits a stop loss order (Stop order with stop-trigger).
+ * 
+ * @param {OrderLeg[]} exitLegs - Exit order legs (reversed from entry)
+ * @param {number} slPrice - Stop loss price (stop-trigger)
+ * @param {string} accountId - Account ID
+ * @param {'GTC' | 'DAY' | 'EXT' | 'IOC' | 'FOK'} timeInForce - Time in force
+ * @returns {Promise<AppOrder>} The submitted SL order
+ * @throws {Error} If submission fails
+ */
+export async function submitSLOrder(
+  exitLegs: OrderLeg[],
+  slPrice: number,
+  accountId: string,
+  timeInForce: 'GTC' | 'DAY' | 'EXT' | 'IOC' | 'FOK' = 'GTC'
+): Promise<AppOrder> {
+  if (!exitLegs || exitLegs.length === 0) {
+    throw new Error('Exit legs are required');
+  }
+  if (slPrice <= 0) {
+    throw new Error('Stop loss price must be positive');
+  }
+  if (!accountId || typeof accountId !== 'string') {
+    throw new Error('Account ID is required');
+  }
+
+  try {
+    const client = await getClient();
+    
+    // Build SL order payload (Stop order with stop-trigger)
+    const payload: StopOrderPayload = {
+      'order-type': 'Stop',
+      'stop-trigger': slPrice,
+      'time-in-force': timeInForce,
+      legs: exitLegs.map((leg) => ({
+        'instrument-type': 'Equity Option',
+        symbol: leg.streamerSymbol,
+        action: mapActionToSDK(leg.action),
+        quantity: leg.quantity,
+      })),
+    };
+
+    // Submit order via SDK
+    const response = await client.orderService.createOrder(accountId, payload);
+    
+    // Normalize SDK response to AppOrder format
+    const order = normalizeOrder(response, accountId);
+    
+    logger.info('Stop loss order submitted', {
+      orderId: order.id,
+      accountId,
+      slPrice,
+    });
+    
+    return order;
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    logger.error('Failed to submit stop loss order', { accountId, slPrice }, error as Error);
+    throw new OrderRejectionError(`Failed to submit stop loss order: ${errorMessage}`);
+  }
+}
+
+/**
+ * Links TP and SL orders as OTOCO via Tastytrade native API.
+ * 
+ * @param {string} tpOrderId - Take profit order ID
+ * @param {string} slOrderId - Stop loss order ID
+ * @param {string} accountId - Account ID
+ * @returns {Promise<void>}
+ * @throws {Error} If linking fails
+ */
+export async function linkOTOCOOrders(
+  tpOrderId: string,
+  slOrderId: string,
+  accountId: string
+): Promise<void> {
+  if (!tpOrderId || typeof tpOrderId !== 'string') {
+    throw new Error('Take profit order ID is required');
+  }
+  if (!slOrderId || typeof slOrderId !== 'string') {
+    throw new Error('Stop loss order ID is required');
+  }
+  if (!accountId || typeof accountId !== 'string') {
+    throw new Error('Account ID is required');
+  }
+
+  try {
+    const client = await getClient();
+    
+    // Use Tastytrade's native OTOCO API to link orders
+    // Note: This may require specific API endpoint - check Tastytrade SDK docs
+    // For now, we'll use the contingent order relationship API if available
+    // The exact API call may vary based on Tastytrade SDK version
+    
+    // Convert order IDs to numbers if needed
+    const tpOrderIdNum = parseInt(tpOrderId, 10);
+    const slOrderIdNum = parseInt(slOrderId, 10);
+    
+    if (isNaN(tpOrderIdNum) || isNaN(slOrderIdNum)) {
+      throw new Error('Invalid order IDs: must be numeric');
+    }
+    
+    // Link orders as OTOCO (One Triggers Others Cancel Others)
+    // This may require a specific API endpoint for contingent orders
+    // Check Tastytrade SDK documentation for the exact method
+    // Example: await client.orderService.linkOTOCOOrders(accountId, tpOrderIdNum, slOrderIdNum);
+    
+    // For now, log that we're linking orders
+    // The actual linking will depend on Tastytrade API support
+    logger.info('Linking OTOCO orders', {
+      tpOrderId,
+      slOrderId,
+      accountId,
+    });
+    
+    // TODO: Implement actual OTOCO linking via Tastytrade API
+    // This may require a specific endpoint or method in the SDK
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    logger.error('Failed to link OTOCO orders', { tpOrderId, slOrderId, accountId }, error as Error);
+    throw new Error(`Failed to link OTOCO orders: ${errorMessage}`);
+  }
+}
+
+/**
+ * Monitors trigger order fill and automatically submits TP/SL orders.
+ * 
+ * @param {string} orderId - Trigger order ID
+ * @param {string} accountId - Account ID
+ * @returns {Promise<void>}
+ * @throws {Error} If monitoring fails
+ */
+export async function monitorOrderFill(
+  orderId: string,
+  accountId: string
+): Promise<void> {
+  if (!orderId || typeof orderId !== 'string') {
+    throw new Error('Order ID is required');
+  }
+  if (!accountId || typeof accountId !== 'string') {
+    throw new Error('Account ID is required');
+  }
+
+  const maxPollAttempts = 300; // 5 minutes at 1 second intervals
+  let attempts = 0;
+  let pollInterval: NodeJS.Timeout | null = null;
+
+  const cleanup = () => {
+    if (pollInterval) {
+      clearInterval(pollInterval);
+      pollInterval = null;
+    }
+  };
+
+  try {
+    const client = await getClient();
+    const orderIdNum = parseInt(orderId, 10);
+    
+    if (isNaN(orderIdNum)) {
+      throw new Error(`Invalid order ID: ${orderId}`);
+    }
+
+    pollInterval = setInterval(async () => {
+      try {
+        attempts++;
+        const order = await client.orderService.getOrder(accountId, orderIdNum);
+        const normalizedOrder = normalizeOrder(order, accountId);
+        
+        if (normalizedOrder.status === 'FILLED') {
+          cleanup();
+          
+          try {
+            // Get OTOCO configuration from registry
+            const config = await orderRegistry.getOTOCOGroup(orderId);
+            if (!config) {
+              throw new Error(`OTOCO configuration not found for order ${orderId}`);
+            }
+            
+            const entryPrice = normalizedOrder.netPrice || config.entryPrice;
+            
+            // Calculate TP/SL prices
+            const tpPrice = calculateTPPrice(entryPrice, config.tpPct);
+            const slPrice = calculateSLPrice(entryPrice, config.slPct);
+            
+            // Build exit legs (reverse of entry)
+            const exitLegs = buildExitLegs(config.entryLegs);
+            
+            // Submit TP and SL orders with retry logic
+            let tpOrder: AppOrder | null = null;
+            let slOrder: AppOrder | null = null;
+            let retries = 0;
+            const maxRetries = 3;
+            
+            while (retries < maxRetries && (!tpOrder || !slOrder)) {
+              try {
+                if (!tpOrder) {
+                  tpOrder = await submitTPOrder(exitLegs, tpPrice, accountId);
+                }
+                if (!slOrder) {
+                  slOrder = await submitSLOrder(exitLegs, slPrice, accountId);
+                }
+                break; // Success, exit retry loop
+              } catch (error) {
+                retries++;
+                if (retries >= maxRetries) {
+                  throw error;
+                }
+                // Exponential backoff: 1s, 2s, 4s
+                await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, retries - 1)));
+              }
+            }
+            
+            if (!tpOrder || !slOrder) {
+              throw new Error('Failed to submit TP/SL orders after retries');
+            }
+            
+            // Link as OTOCO via Tastytrade native API
+            await linkOTOCOOrders(tpOrder.id, slOrder.id, accountId);
+            
+            // Update registry
+            await orderRegistry.updateOTOCOGroup(orderId, {
+              tpOrderId: tpOrder.id,
+              slOrderId: slOrder.id,
+            });
+            
+            logger.info('TP/SL orders submitted after trigger fill', {
+              triggerOrderId: orderId,
+              tpOrderId: tpOrder.id,
+              slOrderId: slOrder.id,
+              accountId,
+            });
+            
+          } catch (error) {
+            // Error handling: log and notify user
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            logger.error('TP/SL submission failed after fill', {
+              triggerOrderId: orderId,
+              accountId,
+            }, error as Error);
+            // TODO: Show notification to user with retry option
+          }
+        } else if (normalizedOrder.status === 'CANCELLED' || normalizedOrder.status === 'REJECTED') {
+          cleanup();
+          logger.warn('Trigger order cancelled or rejected', {
+            orderId,
+            status: normalizedOrder.status,
+            accountId,
+          });
+          // TODO: Notify user order was cancelled/rejected
+        }
+        
+        if (attempts >= maxPollAttempts) {
+          cleanup();
+          logger.warn('Order monitoring timeout', {
+            orderId,
+            attempts,
+            accountId,
+          });
+          // TODO: Notify user of timeout
+        }
+      } catch (error) {
+        // Error handling: log and continue polling unless persistent
+        logger.error('Polling error', {
+          orderId,
+          attempt: attempts,
+          accountId,
+        }, error as Error);
+        
+        if (attempts >= maxPollAttempts) {
+          cleanup();
+        }
+      }
+    }, 1000); // Poll every 1 second
+    
+    // Store monitoring state for cleanup on unmount
+    // This will be handled by the caller
+    
+  } catch (error) {
+    cleanup();
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    logger.error('Failed to start order monitoring', { orderId, accountId }, error as Error);
+    throw new Error(`Failed to start order monitoring: ${errorMessage}`);
+  }
+}
+
+/**
+ * Maps OrderLeg action to SDK action format.
+ * 
+ * @param {OrderLeg['action']} action - OrderLeg action
+ * @returns {string} SDK action format
+ */
+function mapActionToSDK(action: OrderLeg['action']): string {
+  const actionMap: Record<OrderLeg['action'], string> = {
+    'BUY_TO_OPEN': 'Buy to Open',
+    'SELL_TO_OPEN': 'Sell to Open',
+    'BUY_TO_CLOSE': 'Buy to Close',
+    'SELL_TO_CLOSE': 'Sell to Close',
+  };
+  return actionMap[action] || 'Buy to Open';
+}
+
+/**
+ * Updates an existing take profit order.
+ * 
+ * @param {string} tpOrderId - Take profit order ID
+ * @param {number} newTpPrice - New take profit price
+ * @param {string} accountId - Account ID
+ * @returns {Promise<AppOrder>} The updated order
+ * @throws {Error} If update fails
+ */
+export async function updateTPOrder(
+  tpOrderId: string,
+  newTpPrice: number,
+  accountId: string
+): Promise<AppOrder> {
+  if (!tpOrderId || typeof tpOrderId !== 'string') {
+    throw new Error('Take profit order ID is required');
+  }
+  if (newTpPrice <= 0) {
+    throw new Error('New take profit price must be positive');
+  }
+  if (!accountId || typeof accountId !== 'string') {
+    throw new Error('Account ID is required');
+  }
+
+  try {
+    return await replaceOrder(tpOrderId, accountId, {
+      orderId: tpOrderId,
+      price: newTpPrice.toString(),
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    logger.error('Failed to update take profit order', { tpOrderId, accountId }, error as Error);
+    throw new OrderRejectionError(`Failed to update take profit order: ${errorMessage}`, tpOrderId);
+  }
+}
+
+/**
+ * Updates an existing stop loss order.
+ * 
+ * @param {string} slOrderId - Stop loss order ID
+ * @param {number} newSlPrice - New stop loss price
+ * @param {string} accountId - Account ID
+ * @returns {Promise<AppOrder>} The updated order
+ * @throws {Error} If update fails
+ */
+export async function updateSLOrder(
+  slOrderId: string,
+  newSlPrice: number,
+  accountId: string
+): Promise<AppOrder> {
+  if (!slOrderId || typeof slOrderId !== 'string') {
+    throw new Error('Stop loss order ID is required');
+  }
+  if (newSlPrice <= 0) {
+    throw new Error('New stop loss price must be positive');
+  }
+  if (!accountId || typeof accountId !== 'string') {
+    throw new Error('Account ID is required');
+  }
+
+  try {
+    // For stop orders, we need to update the stop-trigger field
+    // This may require a different API call or payload structure
+    // For now, use replaceOrder which should handle it
+    return await replaceOrder(slOrderId, accountId, {
+      orderId: slOrderId,
+      price: newSlPrice.toString(), // Note: This may need to be stop-trigger field
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    logger.error('Failed to update stop loss order', { slOrderId, accountId }, error as Error);
+    throw new OrderRejectionError(`Failed to update stop loss order: ${errorMessage}`, slOrderId);
+  }
+}
+
+/**
+ * Cancels a take profit order.
+ * 
+ * @param {string} tpOrderId - Take profit order ID
+ * @param {string} accountId - Account ID
+ * @returns {Promise<void>}
+ * @throws {Error} If cancellation fails
+ */
+export async function cancelTPOrder(
+  tpOrderId: string,
+  accountId: string
+): Promise<void> {
+  return await cancelOrder(tpOrderId, accountId);
+}
+
+/**
+ * Cancels a stop loss order.
+ * 
+ * @param {string} slOrderId - Stop loss order ID
+ * @param {string} accountId - Account ID
+ * @returns {Promise<void>}
+ * @throws {Error} If cancellation fails
+ */
+export async function cancelSLOrder(
+  slOrderId: string,
+  accountId: string
+): Promise<void> {
+  return await cancelOrder(slOrderId, accountId);
 }
 

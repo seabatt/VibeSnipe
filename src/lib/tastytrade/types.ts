@@ -228,3 +228,116 @@ export interface DryRunResult {
   warnings?: string[];
 }
 
+/**
+ * Order status for monitoring.
+ */
+export type OrderStatus = 'PENDING' | 'WORKING' | 'FILLED' | 'CANCELLED' | 'REJECTED';
+
+/**
+ * Stop order payload with stop-trigger field.
+ */
+export interface StopOrderPayload {
+  /** Order type */
+  'order-type': 'Stop';
+  /** Stop trigger price */
+  'stop-trigger': number;
+  /** Time in force */
+  'time-in-force': 'GTC' | 'DAY' | 'EXT' | 'IOC' | 'FOK';
+  /** Order legs */
+  legs: Array<{
+    /** Instrument type */
+    'instrument-type': 'Equity Option' | 'Equity';
+    /** Symbol */
+    symbol: string;
+    /** Action */
+    action: 'Buy to Open' | 'Sell to Open' | 'Buy to Close' | 'Sell to Close';
+    /** Quantity */
+    quantity: number;
+  }>;
+}
+
+/**
+ * Trigger order payload (the entry order).
+ */
+export interface TriggerOrderPayload {
+  /** Order type */
+  'order-type': 'Limit' | 'Market';
+  /** Price (for limit orders) */
+  price?: number;
+  /** Price effect */
+  'price-effect': 'Debit' | 'Credit';
+  /** Time in force */
+  'time-in-force': 'GTC' | 'DAY' | 'EXT' | 'IOC' | 'FOK';
+  /** Order legs */
+  legs: Array<{
+    /** Instrument type */
+    'instrument-type': 'Equity Option' | 'Equity';
+    /** Symbol */
+    symbol: string;
+    /** Action */
+    action: 'Buy to Open' | 'Sell to Open' | 'Buy to Close' | 'Sell to Close';
+    /** Quantity */
+    quantity: number;
+  }>;
+}
+
+/**
+ * OTOCO (One Triggers Others Cancel Others) order payload.
+ */
+export interface OTOCOOrderPayload {
+  /** Order type */
+  type: 'OTOCO';
+  /** Trigger order (the entry order) */
+  'trigger-order': TriggerOrderPayload;
+  /** Dependent orders (TP and SL) */
+  orders: Array<{
+    /** Order type */
+    'order-type': 'Limit' | 'Stop';
+    /** Price (for limit orders) */
+    price?: number;
+    /** Stop trigger (for stop orders) */
+    'stop-trigger'?: number;
+    /** Price effect */
+    'price-effect'?: 'Debit' | 'Credit';
+    /** Time in force */
+    'time-in-force': 'GTC' | 'DAY' | 'EXT' | 'IOC' | 'FOK';
+    /** Order legs */
+    legs: Array<{
+      /** Instrument type */
+      'instrument-type': 'Equity Option' | 'Equity';
+      /** Symbol */
+      symbol: string;
+      /** Action */
+      action: 'Buy to Open' | 'Sell to Open' | 'Buy to Close' | 'Sell to Close';
+      /** Quantity */
+      quantity: number;
+    }>;
+  }>;
+}
+
+/**
+ * OTOCO group configuration stored in registry.
+ */
+export interface OTOCOGroup {
+  /** Trigger order ID */
+  triggerOrderId: string;
+  /** Account ID */
+  accountId: string;
+  /** Take profit percentage */
+  tpPct: number;
+  /** Stop loss percentage */
+  slPct: number;
+  /** Entry price */
+  entryPrice: number;
+  /** Entry legs */
+  entryLegs: OrderLeg[];
+  /** TP order ID (set after submission) */
+  tpOrderId?: string;
+  /** SL order ID (set after submission) */
+  slOrderId?: string;
+  /** Created timestamp */
+  createdAt: string;
+  /** Last updated timestamp */
+  updatedAt?: string;
+}
+

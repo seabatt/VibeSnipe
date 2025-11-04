@@ -186,6 +186,9 @@ export async function GET() {
       const isLong = quantityDirection === 'Long' || quantity > 0;
       
       // Parse prices from strings to numbers
+      // average-open-price is the ACTUAL entry price from Tastytrade, which accounts for
+      // any last-minute price adjustments at trade entry (to get better pricing or to get in quickly).
+      // This is used for TP/SL calculations to ensure targets are relative to actual entry, not alert price.
       const averageOpenPriceStr = pos['average-open-price'] || pos.averageOpenPrice || '0';
       const averageOpenPrice = parseFloat(averageOpenPriceStr) || 0;
       
@@ -246,7 +249,7 @@ export async function GET() {
         strategy: isOption ? 'Vertical' : 'SPOT', // Will be updated when we group spreads
         legs: legs,
         qty: Math.abs(quantity),
-        avgPrice: averageOpenPrice,
+        avgPrice: averageOpenPrice, // Actual entry price from Tastytrade (accounts for price adjustments)
         pnl: pnl,
         ruleBundle: {
           takeProfitPct: null, // Not set by default - will be set if actually configured

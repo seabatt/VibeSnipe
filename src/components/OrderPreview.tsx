@@ -8,6 +8,40 @@ import { useTokens } from '@/hooks/useTokens';
 import { RiskGraph } from './RiskGraph';
 import { TradeLeg, RuleBundle } from '@/types';
 import { Button } from '@/components/ui';
+import { submitTriggerOrder, monitorOrderFill } from '@/lib/tastytrade/orders';
+import { orderRegistry } from '@/lib/orderRegistry';
+import { getAccount } from '@/lib/tastytrade/client';
+import type { OrderLeg } from '@/lib/tastytrade/types';
+
+/**
+ * Converts TradeLeg to OrderLeg format.
+ * Note: This is a simplified conversion - streamerSymbol may need to be constructed
+ * from underlying, expiry, strike, and right in the actual implementation.
+ */
+function convertTradeLegToOrderLeg(tradeLeg: TradeLeg, underlying: string): OrderLeg {
+  // Build streamer symbol format: "SPX   251219P06275000"
+  // Format: UNDERLYING + EXPIRY(YYMMDD) + RIGHT(P|C) + STRIKE(8 digits padded)
+  const expiryDate = new Date(tradeLeg.expiry);
+  const year = expiryDate.getFullYear().toString().slice(-2);
+  const month = (expiryDate.getMonth() + 1).toString().padStart(2, '0');
+  const day = expiryDate.getDate().toString().padStart(2, '0');
+  const rightChar = tradeLeg.right === 'PUT' ? 'P' : 'C';
+  const strikeStr = Math.round(tradeLeg.strike * 1000).toString().padStart(8, '0');
+  
+  const streamerSymbol = `${underlying}   ${year}${month}${day}${rightChar}${strikeStr}`;
+  
+  // Convert TradeLeg.action ('BUY' | 'SELL') to OrderLeg.action with _TO_OPEN
+  const action: OrderLeg['action'] = tradeLeg.action === 'BUY' 
+    ? 'BUY_TO_OPEN' 
+    : 'SELL_TO_OPEN';
+  
+  return {
+    streamerSymbol,
+    action,
+    quantity: tradeLeg.quantity,
+    price: tradeLeg.price,
+  };
+}
 
 export function OrderPreview() {
   const { pendingOrder, setPendingOrder, addPosition } = useOrders();
@@ -102,43 +136,109 @@ export function OrderPreview() {
     };
 
     try {
-      // Convert TradeLeg[] to VerticalLegs format for submitVertical
-      // Note: This assumes pendingOrder.legs is a 2-leg vertical spread
-      // For now, using placeholder - proper implementation needs to convert TradeLeg to OptionInstrument
-      // TODO: Implement proper conversion from TradeLeg[] to VerticalLegs
+      // Infer underlying from legs (assuming all legs have same underlying)
+      // This is a simplified approach - in production, underlying should be explicit
+      const underlying = 'SPX'; // TODO: Extract from pendingOrder or TradeLeg
       
-      // For now, skipping order submission - component needs proper integration
-      // const vertical: VerticalLegs = {
-      //   shortLeg: { /* convert from TradeLeg */ },
-      //   longLeg: { /* convert from TradeLeg */ },
-      // };
-      // const result = await submitVertical(
-      //   vertical,
-      //   pendingOrder.legs[0]?.quantity || 1,
-      //   spreadPrice?.mid || 0,
-      //   'LIMIT',
-      //   'demo-account-id'
-      // );
+      // Convert TradeLeg[] to OrderLeg[]
+      const entryLegs = pendingOrder.legs.map(leg => 
+        convertTradeLegToOrderLeg(leg, underlying)
+      );
       
-      // Placeholder result for now
-      const result = { id: `ORDER-${Date.now()}`, status: 'PENDING' };
+      const entryPrice = spreadPrice?.mid || 0;
+      
+      // Get account ID from Tastytrade
+      let accountId: string;
+      try {
+        const account = await getAccount();
+        accountId = account.accountNumber;
+      } catch (error) {
+        console.error('Failed to get account ID:', error);
+        throw new Error('Failed to get account ID. Please check your Tastytrade configuration.');
+      }
+      
+      // Determine price effect based on order type
+      // For spreads, debit = buying the spread, credit = selling the spread
+      // For now, default to Debit - this can be determined from strategy type later
+      const priceEffect: 'Debit' | 'Credit' = 'Debit';
+      
+      // If TP/SL are configured, submit trigger order and set up monitoring
+      if ((tpPct > 0 || slPct > 0) && entryPrice > 0) {
+        try {
+          // Submit trigger order first
+          const triggerOrder = await submitTriggerOrder(
+            entryLegs,
+            entryPrice,
+            accountId,
+            priceEffect,
+            'GTC'
+          );
+          
+          // Store TP/SL percentages for later
+          await orderRegistry.storeOTOCOGroup(triggerOrder.id, {
+            triggerOrderId: triggerOrder.id,
+            accountId,
+            tpPct,
+            slPct,
+            entryPrice,
+            entryLegs,
+          });
+          
+          // Start monitoring for fill (non-blocking)
+          // The monitoring function will handle errors internally
+          monitorOrderFill(triggerOrder.id, accountId).catch((err) => {
+            // Error handling: log and notify user
+            console.error('Order monitoring failed:', err);
+            // TODO: Show notification to user via toast/notification system
+          });
+          
+          // Add position with pending status (will be updated when filled)
+          addPosition({
+            id: triggerOrder.id,
+            underlying: underlying as any,
+            strategy: pendingOrder.legs.length === 2 ? 'Vertical' : 'Butterfly',
+            legs: pendingOrder.legs,
+            qty: pendingOrder.legs[0]?.quantity || 1,
+            avgPrice: entryPrice,
+            pnl: 0,
+            ruleBundle,
+            state: 'PENDING',
+            openedAt: new Date().toISOString(),
+          });
+          
+          setPendingOrder(null);
+          return;
+        } catch (error) {
+          // Error handling: log and show user-friendly message
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          console.error('Trigger order submission failed:', error);
+          // TODO: Show error notification to user via toast/notification system
+          alert(`Failed to submit order: ${errorMessage}`);
+          throw error;
+        }
+      } else {
+        // No TP/SL configured, submit as regular order
+        // For now, using placeholder - proper implementation needed
+        const result = { id: `ORDER-${Date.now()}`, status: 'PENDING' as const };
 
-      addPosition({
-        id: result.id,
-        underlying: pendingOrder.legs[0]?.right === 'CALL' ? 'SPX' : 'SPX', // Infer from legs
-        strategy: pendingOrder.legs.length === 2 ? 'Vertical' : 'Butterfly',
-        legs: pendingOrder.legs,
-        qty: pendingOrder.legs[0]?.quantity || 1,
-        avgPrice: spreadPrice?.mid || 0,
-        pnl: 0,
-        ruleBundle,
-        state: 'FILLED',
-        openedAt: new Date().toISOString(),
-      });
+        addPosition({
+          id: result.id,
+          underlying: underlying as any,
+          strategy: pendingOrder.legs.length === 2 ? 'Vertical' : 'Butterfly',
+          legs: pendingOrder.legs,
+          qty: pendingOrder.legs[0]?.quantity || 1,
+          avgPrice: entryPrice,
+          pnl: 0,
+          ruleBundle,
+          state: 'FILLED',
+          openedAt: new Date().toISOString(),
+        });
 
-      setPendingOrder(null);
+        setPendingOrder(null);
+      }
     } catch (err) {
       console.error('Order execution failed:', err);
+      // TODO: Show error notification to user
     }
   };
 

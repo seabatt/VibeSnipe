@@ -41,6 +41,7 @@ import type { ChaseConfig } from './tastytrade/chaseEngine';
 import type { VerticalLegs } from './tastytrade/types';
 import { logger } from './logger';
 import { canAddTrade } from './risk/portfolioTracker';
+import { tradeHistoryService } from './tradeHistoryService';
 
 /**
  * Orchestration configuration.
@@ -154,7 +155,10 @@ export async function executeTradeLifecycle(
       price: intent.limitPrice || 0,
       expiry: intent.legs[0]?.expiry || '',
       accountId: intent.accountId,
-      ruleBundle: intent.ruleBundle,
+      ruleBundle: {
+        takeProfitPct: intent.ruleBundle.takeProfitPct ?? 50, // Default to 50% if null
+        stopLossPct: intent.ruleBundle.stopLossPct ?? 100, // Default to 100% if null
+      },
       strategy_version: intent.strategyVersion,
     };
 
@@ -230,6 +234,9 @@ export async function executeTradeLifecycle(
       orderId: submitResult.order.id,
     });
     
+    // Persist trade with order details
+    await tradeHistoryService.saveTrade(trade, executionIntent, submitResult.order);
+    
     logger.info('Order submitted successfully', {
       tradeId: trade.id,
       orderId: submitResult.order.id,
@@ -238,6 +245,10 @@ export async function executeTradeLifecycle(
     const errorMsg = error instanceof Error ? error.message : 'Failed to submit order';
     logger.error('Order submission failed', { tradeId: trade.id }, error as Error);
     trade = transitionState(trade.id, TradeState.REJECTED, errorMsg);
+    
+    // Persist failed trade
+    await tradeHistoryService.saveTrade(trade, executionIntent);
+    
     return {
       trade,
       success: false,
@@ -248,9 +259,13 @@ export async function executeTradeLifecycle(
   // Transition to WORKING or FILLED based on order status
   if (submitResult.order.status === 'FILLED') {
     trade = transitionState(trade.id, TradeState.FILLED);
+    // Persist updated trade state
+    await tradeHistoryService.saveTrade(trade, executionIntent, submitResult.order);
     logger.info('Order filled immediately', { tradeId: trade.id });
   } else {
     trade = transitionState(trade.id, TradeState.WORKING);
+    // Persist updated trade state
+    await tradeHistoryService.saveTrade(trade, executionIntent, submitResult.order);
     logger.info('Order is working', { tradeId: trade.id });
   }
 
@@ -277,6 +292,21 @@ export async function executeTradeLifecycle(
       // Transition based on chase result
       if ('fillPrice' in chaseResult) {
         trade = transitionState(trade.id, TradeState.FILLED);
+        
+        // Update chase info in history
+        if (submitResult.order.netPrice !== undefined) {
+          await tradeHistoryService.updateChaseInfo(trade.id, {
+            attempts: chaseResult.totalAttempts,
+            initialPrice: submitResult.order.netPrice,
+            finalPrice: chaseResult.fillPrice,
+            totalTimeMs: chaseResult.totalAttempts * (finalConfig.chaseConfig?.stepIntervalMs || 1000),
+            strategy: finalConfig.chaseConfig?.direction || 'up',
+          });
+        }
+        
+        // Persist updated trade state
+        await tradeHistoryService.saveTrade(trade, executionIntent, submitResult.order);
+        
         logger.info('Order filled after chase', {
           tradeId: trade.id,
           attempts: chaseResult.totalAttempts,
@@ -288,6 +318,10 @@ export async function executeTradeLifecycle(
           TradeState.ERROR,
           chaseResult.error || chaseResult.reason
         );
+        
+        // Persist updated trade state
+        await tradeHistoryService.saveTrade(trade, executionIntent, submitResult.order);
+        
         logger.warn('Order chase aborted', {
           tradeId: trade.id,
           reason: chaseResult.reason,
@@ -313,36 +347,64 @@ export async function executeTradeLifecycle(
   let brackets;
   if (finalConfig.attachBrackets) {
     try {
-      // Calculate TP/SL prices from rule bundle
-      // For credit spreads, TP is LOWER price (buy back cheaper), SL is HIGHER price (buy back more)
-      const entryCredit = submitResult.order.netPrice || intent.limitPrice || 0;
+      // Check if rule bundle has TP/SL configured
+      const takeProfitPct = intent.ruleBundle.takeProfitPct;
+      const stopLossPct = intent.ruleBundle.stopLossPct;
       
-      // TP: Buy back at (1 - takeProfitPct%) of credit = 0.50 * credit for 50% TP
-      // SL: Buy back at (1 + stopLossPct%) of credit = 2.00 * credit for 100% SL
-      const tpPrice = entryCredit * (1 - intent.ruleBundle.takeProfitPct / 100);
-      const slPrice = entryCredit * (1 + intent.ruleBundle.stopLossPct / 100);
-      
-      // Ensure prices are positive and SL > TP
-      const finalTpPrice = Math.max(0.05, tpPrice);
-      const finalSlPrice = Math.max(finalTpPrice + 0.05, slPrice);
+      if (takeProfitPct === null || stopLossPct === null) {
+        logger.warn('Brackets not attached - TP/SL not configured', {
+          tradeId: trade.id,
+          takeProfitPct,
+          stopLossPct,
+        });
+      } else {
+        // Calculate TP/SL prices from rule bundle
+        // For credit spreads, TP is LOWER price (buy back cheaper), SL is HIGHER price (buy back more)
+        const entryCredit = submitResult.order.netPrice || intent.limitPrice || 0;
+        
+        // TP: Buy back at (1 - takeProfitPct%) of credit = 0.50 * credit for 50% TP
+        // SL: Buy back at (1 + stopLossPct%) of credit = 2.00 * credit for 100% SL
+        const tpPrice = entryCredit * (1 - takeProfitPct / 100);
+        const slPrice = entryCredit * (1 + stopLossPct / 100);
+        
+        // Ensure prices are positive and SL > TP
+        const finalTpPrice = Math.max(0.05, tpPrice);
+        const finalSlPrice = Math.max(finalTpPrice + 0.05, slPrice);
 
-      const bracketResult = await executeAttachBrackets(
-        submitResult.order.id,
-        finalTpPrice,
-        finalSlPrice,
-        intent.accountId,
-        verticalLegs,
-        intent.quantity,
-        trade.id
-      );
+        const bracketResult = await executeAttachBrackets(
+          submitResult.order.id,
+          finalTpPrice,
+          finalSlPrice,
+          intent.accountId,
+          verticalLegs,
+          intent.quantity,
+          trade.id
+        );
 
-      brackets = bracketResult.bracket;
-      trade = transitionState(trade.id, TradeState.OCO_ATTACHED);
-      logger.info('Brackets attached', {
-        tradeId: trade.id,
-        tp: bracketResult.bracket.takeProfit?.orderId,
-        sl: bracketResult.bracket.stopLoss?.orderId,
-      });
+        brackets = bracketResult.bracket;
+        trade = transitionState(trade.id, TradeState.OCO_ATTACHED);
+        
+        // Persist bracket information to history
+        await tradeHistoryService.updateBrackets(trade.id, {
+          takeProfit: bracketResult.bracket.takeProfit ? {
+            orderId: bracketResult.bracket.takeProfit.orderId,
+            price: finalTpPrice,
+          } : undefined,
+          stopLoss: bracketResult.bracket.stopLoss ? {
+            orderId: bracketResult.bracket.stopLoss.orderId,
+            price: finalSlPrice,
+          } : undefined,
+        });
+        
+        // Persist updated trade state
+        await tradeHistoryService.saveTrade(trade, executionIntent, submitResult.order);
+        
+        logger.info('Brackets attached', {
+          tradeId: trade.id,
+          tp: bracketResult.bracket.takeProfit?.orderId,
+          sl: bracketResult.bracket.stopLoss?.orderId,
+        });
+      }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Failed to attach brackets';
       logger.error('Failed to attach brackets', { tradeId: trade.id }, error as Error);

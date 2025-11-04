@@ -3,6 +3,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Position } from '@/types';
 import { X, Target, StopCircle } from 'lucide-react';
+import { updateTPOrder, updateSLOrder, cancelTPOrder, cancelSLOrder, calculateTPPrice, calculateSLPrice } from '@/lib/tastytrade/orders';
+import { orderRegistry } from '@/lib/orderRegistry';
 
 // Design tokens matching Figma
 const TOKENS = {
@@ -153,53 +155,185 @@ function PositionRow({ position, index, total }: { position: Position; index: nu
     console.log('Close position:', position.id);
   };
 
-  const handleTP = () => {
-    // TODO: Implement take profit action
-    console.log('Take Profit:', position.id);
+  const handleTP = async () => {
+    try {
+      // Get OTOCO group for this position
+      const otocoGroup = await orderRegistry.getOTOCOGroup(position.id);
+      
+      if (!otocoGroup || !otocoGroup.tpOrderId) {
+        // No TP order exists yet - would need to create one
+        // This could happen if:
+        // 1. Position was created before OTOCO feature
+        // 2. Trigger order hasn't filled yet
+        // 3. TP order wasn't created for some reason
+        const message = otocoGroup 
+          ? 'Take profit order not yet created. The order will be created automatically when the entry order fills.'
+          : 'Take profit order not found for this position.';
+        alert(message);
+        // TODO: Show modal to create new TP order or show status
+        return;
+      }
+      
+      // Get current TP price from ruleBundle
+      const currentTPPrice = calculateTPPrice(position.avgPrice, position.ruleBundle.takeProfitPct || 0);
+      
+      // Show modal/dropdown to modify TP order
+      // For now, simple prompt - would be replaced with proper UI
+      const newTPPriceStr = prompt(
+        `Take Profit Order\n\n` +
+        `Current TP Price: $${currentTPPrice.toFixed(2)}\n` +
+        `Current TP %: ${position.ruleBundle.takeProfitPct || 0}%\n` +
+        `Order ID: ${otocoGroup.tpOrderId}\n\n` +
+        `Enter new TP price:`
+      );
+      
+      if (newTPPriceStr) {
+        const newTPPrice = parseFloat(newTPPriceStr);
+        if (!isNaN(newTPPrice) && newTPPrice > 0) {
+          try {
+            await updateTPOrder(otocoGroup.tpOrderId, newTPPrice, otocoGroup.accountId);
+            console.log('TP order updated:', newTPPrice);
+            alert(`Take profit order updated to $${newTPPrice.toFixed(2)}`);
+            // TODO: Show success notification via toast
+            // TODO: Refresh positions list
+          } catch (updateError) {
+            const errorMessage = updateError instanceof Error ? updateError.message : 'Unknown error';
+            console.error('Failed to update TP order:', updateError);
+            alert(`Failed to update take profit order: ${errorMessage}`);
+            // TODO: Show error notification via toast
+          }
+        } else {
+          alert('Invalid price. Please enter a positive number.');
+        }
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Failed to update TP order:', error);
+      alert(`Error: ${errorMessage}`);
+      // TODO: Show error notification via toast
+    }
   };
 
-  const handleSL = () => {
-    // TODO: Implement stop loss action
-    console.log('Stop Loss:', position.id);
+  const handleSL = async () => {
+    try {
+      // Get OTOCO group for this position
+      const otocoGroup = await orderRegistry.getOTOCOGroup(position.id);
+      
+      if (!otocoGroup || !otocoGroup.slOrderId) {
+        // No SL order exists yet - would need to create one
+        // This could happen if:
+        // 1. Position was created before OTOCO feature
+        // 2. Trigger order hasn't filled yet
+        // 3. SL order wasn't created for some reason
+        const message = otocoGroup 
+          ? 'Stop loss order not yet created. The order will be created automatically when the entry order fills.'
+          : 'Stop loss order not found for this position.';
+        alert(message);
+        // TODO: Show modal to create new SL order or show status
+        return;
+      }
+      
+      // Get current SL price from ruleBundle
+      const currentSLPrice = calculateSLPrice(position.avgPrice, position.ruleBundle.stopLossPct || 0);
+      
+      // Show modal/dropdown to modify SL order
+      // For now, simple prompt - would be replaced with proper UI
+      const newSLPriceStr = prompt(
+        `Stop Loss Order\n\n` +
+        `Current SL Price: $${currentSLPrice.toFixed(2)}\n` +
+        `Current SL %: ${position.ruleBundle.stopLossPct || 0}%\n` +
+        `Order ID: ${otocoGroup.slOrderId}\n\n` +
+        `Enter new SL price:`
+      );
+      
+      if (newSLPriceStr) {
+        const newSLPrice = parseFloat(newSLPriceStr);
+        if (!isNaN(newSLPrice) && newSLPrice > 0) {
+          try {
+            await updateSLOrder(otocoGroup.slOrderId, newSLPrice, otocoGroup.accountId);
+            console.log('SL order updated:', newSLPrice);
+            alert(`Stop loss order updated to $${newSLPrice.toFixed(2)}`);
+            // TODO: Show success notification via toast
+            // TODO: Refresh positions list
+          } catch (updateError) {
+            const errorMessage = updateError instanceof Error ? updateError.message : 'Unknown error';
+            console.error('Failed to update SL order:', updateError);
+            alert(`Failed to update stop loss order: ${errorMessage}`);
+            // TODO: Show error notification via toast
+          }
+        } else {
+          alert('Invalid price. Please enter a positive number.');
+        }
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Failed to update SL order:', error);
+      alert(`Error: ${errorMessage}`);
+      // TODO: Show error notification via toast
+    }
   };
 
   // Calculate TP/SL progress using exact Figma formula
   // TP: ((current - entry) / (target - entry)) * 100
   // SL: ((entry - current) / (entry - stop)) * 100
-  // Check if TP/SL is actually set
+  //
+  // IMPORTANT: TP/SL targets are calculated from the ACTUAL entry price (position.avgPrice),
+  // NOT from the Discord alert price. This ensures that last-minute price adjustments at
+  // trade entry (to get better pricing or to get in quickly) are properly accounted for.
+  //
+  // Example:
+  // - Discord alert: "Enter at $450, TP 50%"
+  // - Actual entry: $448 (better price) or $452 (fast entry)
+  // - TP target: $448 * 1.5 = $672 (or $452 * 1.5 = $678)
+  // - The TP percentage stays the same, but targets are relative to actual entry price
+  //
+  // The avgPrice comes from Tastytrade API (average-open-price) which reflects the
+  // actual average entry price of the position, accounting for any price adjustments.
+  
+  // Check if TP/SL is actually set (not null)
   const hasTP = position.ruleBundle.takeProfitPct != null;
   const hasSL = position.ruleBundle.stopLossPct != null;
   
-  // Calculate current price from P/L
-  const multiplier = position.strategy === 'SPOT' ? 1 : 100;
-  const currentPrice = position.avgPrice + (position.pnl / (position.qty * multiplier));
+  // Validate avgPrice before calculations
+  if (!position.avgPrice || position.avgPrice <= 0) {
+    console.warn(`Invalid avgPrice for position ${position.id}: ${position.avgPrice}`);
+  }
   
-  // Only calculate progress if TP/SL is set
+  // Calculate current price from P/L
+  // Use actual entry price (avgPrice) from Tastytrade, not alert price
+  const multiplier = position.strategy === 'SPOT' ? 1 : 100;
+  const actualEntryPrice = position.avgPrice; // Explicitly use actual entry price
+  const currentPrice = actualEntryPrice + (position.pnl / (position.qty * multiplier));
+  
+  // Only calculate progress if TP/SL is set and entry price is valid
   let tpProgress = 0;
   let slProgress = 0;
   
-  if (hasTP) {
-    // Calculate target price from ruleBundle percentage
-    const targetPrice = position.avgPrice * (1 + position.ruleBundle.takeProfitPct! / 100);
-    // TP progress: how far towards target
-    tpProgress = targetPrice > position.avgPrice
-      ? Math.max(0, Math.min(100, ((currentPrice - position.avgPrice) / (targetPrice - position.avgPrice)) * 100))
+  if (hasTP && actualEntryPrice > 0) {
+    // Calculate target price from actual entry price and ruleBundle percentage
+    // targetPrice = actualEntryPrice * (1 + takeProfitPct / 100)
+    const targetPrice = actualEntryPrice * (1 + position.ruleBundle.takeProfitPct! / 100);
+    // TP progress: how far towards target (using actual entry price)
+    tpProgress = targetPrice > actualEntryPrice
+      ? Math.max(0, Math.min(100, ((currentPrice - actualEntryPrice) / (targetPrice - actualEntryPrice)) * 100))
       : 0;
   }
   
-  if (hasSL) {
-    // Calculate stop price from ruleBundle percentage
-    const stopPrice = position.avgPrice * (1 - position.ruleBundle.stopLossPct! / 100);
-    // SL progress: how far towards stop
-    slProgress = stopPrice < position.avgPrice
-      ? Math.max(0, Math.min(100, ((position.avgPrice - currentPrice) / (position.avgPrice - stopPrice)) * 100))
+  if (hasSL && actualEntryPrice > 0) {
+    // Calculate stop price from actual entry price and ruleBundle percentage
+    // stopPrice = actualEntryPrice * (1 - stopLossPct / 100)
+    const stopPrice = actualEntryPrice * (1 - position.ruleBundle.stopLossPct! / 100);
+    // SL progress: how far towards stop (using actual entry price)
+    slProgress = stopPrice < actualEntryPrice
+      ? Math.max(0, Math.min(100, ((actualEntryPrice - currentPrice) / (actualEntryPrice - stopPrice)) * 100))
       : 0;
   }
 
   // Generate curve data (simplified - would need actual historical data)
+  // Use actualEntryPrice for consistency (accounts for price adjustments)
   const curveData = position.pnl >= 0 
-    ? [position.avgPrice * 0.9, position.avgPrice * 0.92, position.avgPrice * 0.95, position.avgPrice * 0.97, position.avgPrice * 0.99, currentPrice, currentPrice]
-    : [position.avgPrice * 1.1, position.avgPrice * 1.08, position.avgPrice * 1.05, position.avgPrice * 1.03, position.avgPrice * 1.01, currentPrice, currentPrice];
+    ? [actualEntryPrice * 0.9, actualEntryPrice * 0.92, actualEntryPrice * 0.95, actualEntryPrice * 0.97, actualEntryPrice * 0.99, currentPrice, currentPrice]
+    : [actualEntryPrice * 1.1, actualEntryPrice * 1.08, actualEntryPrice * 1.05, actualEntryPrice * 1.03, actualEntryPrice * 1.01, currentPrice, currentPrice];
 
   return (
     <div

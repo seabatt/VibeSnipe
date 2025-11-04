@@ -48,8 +48,14 @@ class OrderRegistryClass {
   /** In-memory store of order records */
   private orders: Map<string, OrderRecord> = new Map();
   
+  /** In-memory store of OTOCO groups */
+  private otocoGroups: Map<string, any> = new Map();
+  
   /** Storage key for persistence */
   private readonly STORAGE_KEY = 'vibesnipe_order_registry';
+  
+  /** Storage key for OTOCO groups */
+  private readonly OTOCO_STORAGE_KEY = 'vibesnipe_otoco_groups';
   
   /** Maximum age of records to keep (24 hours) */
   private readonly MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -59,12 +65,17 @@ class OrderRegistryClass {
    */
   constructor() {
     this.loadFromStorage();
+    this.loadOTOCOGroupsFromStorage();
     
     // Clean up old records on startup
     this.cleanup();
+    this.cleanupOTOCOGroups();
     
     // Periodic cleanup every hour
-    setInterval(() => this.cleanup(), 60 * 60 * 1000);
+    setInterval(() => {
+      this.cleanup();
+      this.cleanupOTOCOGroups();
+    }, 60 * 60 * 1000);
   }
 
   /**
@@ -267,6 +278,146 @@ class OrderRegistryClass {
       byStatus,
       avgRetryCount: orders.length > 0 ? totalRetries / orders.length : 0,
     };
+  }
+
+  /**
+   * Load OTOCO groups from localStorage.
+   */
+  private loadOTOCOGroupsFromStorage(): void {
+    if (typeof window === 'undefined') {
+      return; // Server-side, no localStorage
+    }
+
+    try {
+      const stored = localStorage.getItem(this.OTOCO_STORAGE_KEY);
+      if (stored) {
+        const groups: any[] = JSON.parse(stored);
+        for (const group of groups) {
+          this.otocoGroups.set(group.triggerOrderId, group);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load OTOCO groups from storage:', error);
+    }
+  }
+
+  /**
+   * Save OTOCO groups to localStorage.
+   */
+  private saveOTOCOGroupsToStorage(): void {
+    if (typeof window === 'undefined') {
+      return; // Server-side, no localStorage
+    }
+
+    try {
+      const groups = Array.from(this.otocoGroups.values());
+      localStorage.setItem(this.OTOCO_STORAGE_KEY, JSON.stringify(groups));
+    } catch (error) {
+      console.error('Failed to save OTOCO groups to storage:', error);
+    }
+  }
+
+  /**
+   * Clean up old OTOCO groups.
+   */
+  private cleanupOTOCOGroups(): void {
+    const now = Date.now();
+    const cutoff = new Date(now - this.MAX_AGE_MS);
+
+    for (const [id, group] of this.otocoGroups.entries()) {
+      const createdAt = new Date(group.createdAt || group.updatedAt || now);
+      if (createdAt < cutoff) {
+        this.otocoGroups.delete(id);
+      }
+    }
+
+    this.saveOTOCOGroupsToStorage();
+  }
+
+  /**
+   * Store an OTOCO group configuration.
+   * 
+   * @param triggerOrderId - Trigger order ID
+   * @param config - OTOCO group configuration
+   */
+  async storeOTOCOGroup(triggerOrderId: string, config: {
+    triggerOrderId: string;
+    accountId: string;
+    tpPct: number;
+    slPct: number;
+    entryPrice: number;
+    entryLegs: any[];
+    tpOrderId?: string;
+    slOrderId?: string;
+  }): Promise<void> {
+    const group = {
+      ...config,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    
+    this.otocoGroups.set(triggerOrderId, group);
+    this.saveOTOCOGroupsToStorage();
+  }
+
+  /**
+   * Get an OTOCO group by trigger order ID.
+   * 
+   * @param triggerOrderId - Trigger order ID
+   * @returns OTOCO group or undefined
+   */
+  async getOTOCOGroup(triggerOrderId: string): Promise<any | undefined> {
+    return this.otocoGroups.get(triggerOrderId);
+  }
+
+  /**
+   * Update an OTOCO group.
+   * 
+   * @param triggerOrderId - Trigger order ID
+   * @param updates - Updates to apply
+   */
+  async updateOTOCOGroup(triggerOrderId: string, updates: {
+    tpOrderId?: string;
+    slOrderId?: string;
+    [key: string]: any;
+  }): Promise<void> {
+    const group = this.otocoGroups.get(triggerOrderId);
+    if (!group) {
+      throw new Error(`OTOCO group not found for trigger order ${triggerOrderId}`);
+    }
+
+    const updatedGroup = {
+      ...group,
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    };
+
+    this.otocoGroups.set(triggerOrderId, updatedGroup);
+    this.saveOTOCOGroupsToStorage();
+  }
+
+  /**
+   * Get all OTOCO groups.
+   * 
+   * @returns Array of all OTOCO groups
+   */
+  getAllOTOCOGroups(): any[] {
+    return Array.from(this.otocoGroups.values());
+  }
+
+  /**
+   * Get OTOCO group by TP or SL order ID.
+   * 
+   * @param orderId - TP or SL order ID
+   * @returns OTOCO group or undefined
+   */
+  getOTOCOGroupByOrderId(orderId: string): any | undefined {
+    for (const group of this.otocoGroups.values()) {
+      if (group.tpOrderId === orderId || group.slOrderId === orderId) {
+        return group;
+      }
+    }
+    return undefined;
   }
 }
 
