@@ -167,10 +167,10 @@ export function buildTradeIntent(options: BuildTradeIntentOptions): TradeIntent 
   if (!ruleBundle) {
     throw new Error('Rule bundle is required');
   }
-  if (!Number.isFinite(ruleBundle.takeProfitPct) || ruleBundle.takeProfitPct < 0) {
+  if (ruleBundle.takeProfitPct !== null && (!Number.isFinite(ruleBundle.takeProfitPct) || ruleBundle.takeProfitPct < 0)) {
     throw new Error('Rule bundle takeProfitPct must be non-negative');
   }
-  if (!Number.isFinite(ruleBundle.stopLossPct) || ruleBundle.stopLossPct < 0) {
+  if (ruleBundle.stopLossPct !== null && (!Number.isFinite(ruleBundle.stopLossPct) || ruleBundle.stopLossPct < 0)) {
     throw new Error('Rule bundle stopLossPct must be non-negative');
   }
 
