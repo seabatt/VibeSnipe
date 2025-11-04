@@ -75,6 +75,24 @@ export function Dashboard() {
     return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
 
+  // Check if market is open (9:30 AM - 4:00 PM ET, weekdays only)
+  const isMarketOpen = (): boolean => {
+    const et = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    const hours = et.getHours();
+    const minutes = et.getMinutes();
+    const currentMinutes = hours * 60 + minutes;
+    
+    // Market hours: 9:30 AM - 4:00 PM ET (930 minutes - 960 minutes)
+    const marketOpen = 930; // 9:30 AM
+    const marketClose = 960; // 4:00 PM
+    
+    // Check if it's a weekday (Monday-Friday = 1-5)
+    const dayOfWeek = et.getDay();
+    const isWeekday = dayOfWeek >= 1 && dayOfWeek <= 5;
+    
+    return isWeekday && currentMinutes >= marketOpen && currentMinutes < marketClose;
+  };
+
   if (!mounted) {
     return (
       <div style={{ 
@@ -348,11 +366,14 @@ export function Dashboard() {
             <TradingBlocks 
               blocks={blocks} 
               currentBlock={currentBlock} 
+              nextBlock={nextBlock}
               now={now} 
               getTimeRemaining={getTimeRemaining}
               isMobile={isMobile}
               tokens={tokens}
               colors={colors}
+              positions={positions}
+              isMarketOpen={isMarketOpen()}
             />
           </div>
 
@@ -369,15 +390,107 @@ export function Dashboard() {
 interface TradingBlocksProps {
   blocks: any[];
   currentBlock: any;
+  nextBlock: any;
   now: Date;
   getTimeRemaining: (time: string) => string;
   isMobile: boolean;
   tokens: any;
   colors: any;
+  positions: Position[];
+  isMarketOpen: boolean;
 }
 
-function TradingBlocks({ blocks, currentBlock, now, getTimeRemaining, isMobile, tokens, colors }: TradingBlocksProps) {
+function TradingBlocks({ blocks, currentBlock, nextBlock, now, getTimeRemaining, isMobile, tokens, colors, positions, isMarketOpen }: TradingBlocksProps) {
   const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+  // Helper function to get time until a block starts
+  const getTimeUntilStart = (blockStartTime: string): string => {
+    const [startHour, startMin] = blockStartTime.split(':').map(Number);
+    const startMinutes = startHour * 60 + startMin;
+    const remaining = startMinutes - currentMinutes;
+    const mins = Math.max(0, Math.floor(remaining));
+    const secs = Math.max(0, 60 - now.getSeconds());
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  };
+
+  // Helper function to get positions for a specific block
+  const getBlockPositions = (block: any) => {
+    return positions.filter(pos => {
+      // Match underlying and strategy
+      if (pos.underlying !== block.underlying || pos.strategy !== block.strategy) {
+        return false;
+      }
+      
+      // Check if position was opened during this block's time window
+      const openedAt = new Date(pos.openedAt);
+      const openedMinutes = openedAt.getHours() * 60 + openedAt.getMinutes();
+      const [startHour, startMin] = block.windowStart.split(':').map(Number);
+      const startMinutes = startHour * 60 + startMin;
+      const [endHour, endMin] = block.windowEnd.split(':').map(Number);
+      const endMinutes = endHour * 60 + endMin;
+      
+      return openedMinutes >= startMinutes && openedMinutes < endMinutes;
+    });
+  };
+
+  // Helper function to get dot color for a block
+  const getBlockDotColor = (block: any) => {
+    const [startHour, startMin] = block.windowStart.split(':').map(Number);
+    const startMinutes = startHour * 60 + startMin;
+    const [endHour, endMin] = block.windowEnd.split(':').map(Number);
+    const endMinutes = endHour * 60 + endMin;
+    const isActive = currentBlock?.id === block.id;
+    const isInTimeWindow = currentMinutes >= startMinutes && currentMinutes < endMinutes;
+    const isFuture = currentMinutes < startMinutes;
+    const isPast = currentMinutes >= endMinutes;
+    
+    // Blue for upcoming blocks
+    if (isFuture) {
+      return colors.semantic.info; // Blue
+    }
+    
+    // Get positions for this block
+    const blockPositions = getBlockPositions(block);
+    
+    if (blockPositions.length === 0) {
+      // No trades for this block - default to blue
+      return colors.semantic.info;
+    }
+    
+    // Yellow for active block (in time window) with open positions
+    if (isInTimeWindow) {
+      const hasOpenPositions = blockPositions.some(p => p.state !== 'CLOSED');
+      if (hasOpenPositions) {
+        return '#FFD700'; // Yellow
+      }
+    }
+    
+    // For past blocks, check closed positions
+    if (isPast) {
+      const closedPositions = blockPositions.filter(p => p.state === 'CLOSED');
+      
+      if (closedPositions.length === 0) {
+        // No closed positions yet - default to blue
+        return colors.semantic.info;
+      }
+      
+      // Calculate aggregate P/L for closed positions
+      const totalPnL = closedPositions.reduce((sum, p) => sum + (p.pnl || 0), 0);
+      
+      // Green for won, Red for lost
+      if (totalPnL > 0) {
+        return colors.semantic.profit; // Green
+      } else if (totalPnL < 0) {
+        return colors.semantic.risk; // Red
+      }
+      
+      // Break-even - default to blue
+      return colors.semantic.info;
+    }
+    
+    // Default to blue for any other case
+    return colors.semantic.info;
+  };
 
   return (
     <div style={{ 
@@ -391,12 +504,14 @@ function TradingBlocks({ blocks, currentBlock, now, getTimeRemaining, isMobile, 
         const [endHour, endMin] = block.windowEnd.split(':').map(Number);
         const endMinutes = endHour * 60 + endMin;
         
-        const isActive = currentMinutes >= startMinutes && currentMinutes < endMinutes;
+        // Use currentBlock prop to determine if this is the active block
+        const isActive = currentBlock?.id === block.id;
         const isPast = currentMinutes >= endMinutes;
         const isFuture = currentMinutes < startMinutes;
+        const isNext = nextBlock?.id === block.id && !isActive;
 
-        // Mock performance (would come from actual trade history)
-        const performance = isPast ? (Math.random() > 0.5 ? 'win' : 'loss') : null;
+        // Get dot color based on block status and positions
+        const dotColor = getBlockDotColor(block);
 
         return (
           <div
@@ -404,13 +519,22 @@ function TradingBlocks({ blocks, currentBlock, now, getTimeRemaining, isMobile, 
             style={{
               padding: `${tokens.space.md}px ${tokens.space.lg}px`,
               borderRadius: `${tokens.radius.md}px`,
-              border: `1px solid ${isActive ? colors.semantic.info + '60' : colors.border}`,
+              border: `1px solid ${
+                isActive 
+                  ? colors.semantic.info + '80' // Stronger border for active
+                  : isNext && isMarketOpen
+                    ? colors.semantic.info + '40' // Highlight next block when market is open
+                    : colors.border
+              }`,
               backgroundColor: isActive 
-                ? colors.semantic.info + '10'
-                : isPast
-                  ? colors.surface + '40'
-                  : colors.surface,
+                ? colors.semantic.info + '15' // More visible background for active
+                : isNext && isMarketOpen
+                  ? colors.semantic.info + '08' // Subtle highlight for next block
+                  : isPast
+                    ? colors.surface + '40'
+                    : colors.surface,
               opacity: isPast ? 0.5 : 1,
+              boxShadow: isActive ? `0 0 0 2px ${colors.semantic.info}30` : 'none',
             }}
           >
             <div style={{ 
@@ -427,14 +551,8 @@ function TradingBlocks({ blocks, currentBlock, now, getTimeRemaining, isMobile, 
                 width: '8px',
                 height: '8px',
                 borderRadius: '50%',
-                backgroundColor: isPast 
-                  ? (performance === 'win' 
-                      ? colors.semantic.profit 
-                      : performance === 'loss'
-                        ? colors.semantic.risk
-                        : colors.semantic.info)
-                  : colors.semantic.info,
-                opacity: isPast ? 1 : 0.5,
+                backgroundColor: dotColor,
+                opacity: 1,
               }} />
             </div>
             
@@ -462,6 +580,26 @@ function TradingBlocks({ blocks, currentBlock, now, getTimeRemaining, isMobile, 
                   }}
                 >
                   Active · {getTimeRemaining(block.windowEnd)}
+                </span>
+              </div>
+            )}
+            
+            {isNext && isMarketOpen && !isActive && (
+              <div style={{ marginTop: `${tokens.space.sm}px` }}>
+                <span 
+                  style={{
+                    display: 'inline-block',
+                    padding: `${tokens.space.xs}px ${tokens.space.sm}px`,
+                    borderRadius: `${tokens.space.xs}px`,
+                    fontSize: `10px`,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                    color: colors.semantic.info,
+                    backgroundColor: colors.semantic.info + '15',
+                    border: `1px solid ${colors.semantic.info}30`,
+                  }}
+                >
+                  Next · {getTimeUntilStart(block.windowStart)}
                 </span>
               </div>
             )}
