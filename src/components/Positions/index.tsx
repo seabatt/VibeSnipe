@@ -163,19 +163,24 @@ function PositionRow({ position, index, total }: { position: Position; index: nu
     console.log('Stop Loss:', position.id);
   };
 
-  // Calculate TP/SL progress using Figma formula
+  // Calculate TP/SL progress using exact Figma formula
   // TP: ((current - entry) / (target - entry)) * 100
   // SL: ((entry - current) / (entry - stop)) * 100
-  // For now, use simplified calculation based on P/L
-  const currentPrice = position.avgPrice + (position.pnl / (position.qty * (position.strategy === 'SPOT' ? 1 : 100)));
+  // Calculate current price from P/L
+  const multiplier = position.strategy === 'SPOT' ? 1 : 100;
+  const currentPrice = position.avgPrice + (position.pnl / (position.qty * multiplier));
+  
+  // Calculate target and stop prices from ruleBundle percentages
   const targetPrice = position.avgPrice * (1 + position.ruleBundle.takeProfitPct / 100);
   const stopPrice = position.avgPrice * (1 - position.ruleBundle.stopLossPct / 100);
   
-  const tpProgress = position.pnl > 0 && targetPrice > position.avgPrice
+  // TP progress: how far towards target
+  const tpProgress = targetPrice > position.avgPrice
     ? Math.max(0, Math.min(100, ((currentPrice - position.avgPrice) / (targetPrice - position.avgPrice)) * 100))
     : 0;
   
-  const slProgress = position.pnl < 0 && stopPrice < position.avgPrice
+  // SL progress: how far towards stop
+  const slProgress = stopPrice < position.avgPrice
     ? Math.max(0, Math.min(100, ((position.avgPrice - currentPrice) / (position.avgPrice - stopPrice)) * 100))
     : 0;
 
@@ -186,79 +191,73 @@ function PositionRow({ position, index, total }: { position: Position; index: nu
 
   return (
     <div
-      className={`grid items-center transition-colors ${index < total - 1 ? 'border-b border-border-dark dark:border-border-dark' : ''}`}
-      style={{
+      style={{ 
+        display: 'grid',
         gridTemplateColumns: '2fr 0.6fr 1fr 0.8fr 1.2fr 0.8fr 0.6fr 2fr',
-        padding: `${TOKENS.space.md}px ${TOKENS.space.lg}px`,
         gap: `${TOKENS.space.lg}px`,
+        padding: `${TOKENS.space.md}px ${TOKENS.space.lg}px`,
+        borderBottom: index < total - 1 ? '1px solid rgba(35, 39, 52, 1)' : 'none',
+        alignItems: 'center',
+        transition: 'background-color 0.15s ease',
       }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.backgroundColor = 'rgba(35, 39, 52, 0.4)'; // border + 40 opacity
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.backgroundColor = 'transparent';
-      }}
+      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(35, 39, 52, 0.4)'}
+      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
     >
       {/* Symbol/Strategy */}
       <div>
-        <div 
-          className="text-text-primary-dark dark:text-text-primary-dark"
-          style={{ 
-            fontSize: `${TOKENS.type.sm}px`,
-            marginBottom: '2px',
-          }}
-        >
+        <div style={{ 
+          fontSize: `${TOKENS.type.sm}px`,
+          color: 'rgb(255, 255, 255)', // textPrimary
+          marginBottom: '2px',
+        }}>
           {symbol}
         </div>
         {strategy && (
-          <div 
-            className="text-text-secondary-dark dark:text-text-secondary-dark"
-            style={{ 
-              fontSize: `${TOKENS.type.xs}px`,
-            }}
-          >
+          <div style={{ 
+            fontSize: `${TOKENS.type.xs}px`,
+            color: 'rgb(169, 175, 195)', // textSecondary
+          }}>
             {strategy}
           </div>
         )}
       </div>
 
       {/* Qty */}
-      <div 
-        className="text-text-primary-dark dark:text-text-primary-dark tabular-nums"
-        style={{ 
-          fontSize: `${TOKENS.type.sm}px`,
-        }}
-      >
+      <div style={{ 
+        fontSize: `${TOKENS.type.sm}px`,
+        color: 'rgb(255, 255, 255)', // textPrimary
+        fontVariantNumeric: 'tabular-nums lining-nums',
+      }}>
         {position.qty}
       </div>
 
       {/* Entry */}
-      <div 
-        className="text-text-primary-dark dark:text-text-primary-dark tabular-nums"
-        style={{ 
-          fontSize: `${TOKENS.type.sm}px`,
-        }}
-      >
+      <div style={{ 
+        fontSize: `${TOKENS.type.sm}px`,
+        color: 'rgb(255, 255, 255)', // textPrimary
+        fontVariantNumeric: 'tabular-nums lining-nums',
+      }}>
         ${position.avgPrice.toFixed(2)}
       </div>
 
       {/* P/L */}
-      <div className="flex items-center gap-2">
+      <div style={{ display: 'flex', alignItems: 'center', gap: `${TOKENS.space.sm}px` }}>
         <PLRing percent={pnlPercent} />
         <div>
           <div 
-            className="tabular-nums"
             style={{ 
               fontSize: `${TOKENS.type.sm}px`,
               color: position.pnl >= 0 ? TOKENS.color.semantic.profit : TOKENS.color.semantic.risk,
+              fontVariantNumeric: 'tabular-nums lining-nums',
             }}
           >
             {position.pnl >= 0 ? '+' : ''}${position.pnl.toFixed(2)}
           </div>
           <div 
-            className="text-text-secondary-dark dark:text-text-secondary-dark tabular-nums"
             style={{ 
               fontSize: `${TOKENS.type.xs}px`,
+              color: 'rgb(169, 175, 195)', // textSecondary
+              fontVariantNumeric: 'tabular-nums lining-nums',
             }}
           >
             {pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(1)}%
@@ -267,69 +266,61 @@ function PositionRow({ position, index, total }: { position: Position; index: nu
       </div>
 
       {/* TP/SL Bars */}
-      <div className="flex flex-col gap-1">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: `${TOKENS.space.xs}px` }}>
         {/* TP Bar */}
-        <div className="flex items-center gap-1">
-          <span 
-            className="text-text-secondary-dark dark:text-text-secondary-dark"
-            style={{ 
-              fontSize: `${TOKENS.type.xs}px`,
-              width: '20px',
-            }}
-          >
+        <div style={{ display: 'flex', alignItems: 'center', gap: `${TOKENS.space.xs}px` }}>
+          <span style={{ 
+            fontSize: `${TOKENS.type.xs}px`,
+            color: 'rgb(169, 175, 195)', // textSecondary
+            width: '20px',
+          }}>
             TP
           </span>
-          <div 
-            className="bg-border-dark dark:bg-border-dark rounded-sm relative overflow-hidden"
-            style={{ 
-              flex: 1,
-              height: '4px',
+          <div style={{ 
+            flex: 1,
+            height: '4px',
+            backgroundColor: 'rgba(35, 39, 52, 1)', // border
+            borderRadius: '2px',
+            position: 'relative',
+            overflow: 'hidden',
+          }}>
+            <div style={{ 
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              bottom: 0,
+              width: `${Math.max(0, Math.min(100, tpProgress))}%`,
+              backgroundColor: TOKENS.color.semantic.profit,
               borderRadius: '2px',
-            }}
-          >
-            <div 
-              className="bg-profit transition-all duration-200"
-              style={{ 
-                position: 'absolute',
-                left: 0,
-                top: 0,
-                bottom: 0,
-                width: `${Math.max(0, Math.min(100, tpProgress))}%`,
-                borderRadius: '2px',
-              }}
-            />
+            }} />
           </div>
         </div>
         {/* SL Bar */}
-        <div className="flex items-center gap-1">
-          <span 
-            className="text-text-secondary-dark dark:text-text-secondary-dark"
-            style={{ 
-              fontSize: `${TOKENS.type.xs}px`,
-              width: '20px',
-            }}
-          >
+        <div style={{ display: 'flex', alignItems: 'center', gap: `${TOKENS.space.xs}px` }}>
+          <span style={{ 
+            fontSize: `${TOKENS.type.xs}px`,
+            color: 'rgb(169, 175, 195)', // textSecondary
+            width: '20px',
+          }}>
             SL
           </span>
-          <div 
-            className="bg-border-dark dark:bg-border-dark rounded-sm relative overflow-hidden"
-            style={{ 
-              flex: 1,
-              height: '4px',
+          <div style={{ 
+            flex: 1,
+            height: '4px',
+            backgroundColor: 'rgba(35, 39, 52, 1)', // border
+            borderRadius: '2px',
+            position: 'relative',
+            overflow: 'hidden',
+          }}>
+            <div style={{ 
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              bottom: 0,
+              width: `${Math.max(0, Math.min(100, slProgress))}%`,
+              backgroundColor: TOKENS.color.semantic.risk,
               borderRadius: '2px',
-            }}
-          >
-            <div 
-              className="bg-risk transition-all duration-200"
-              style={{ 
-                position: 'absolute',
-                left: 0,
-                top: 0,
-                bottom: 0,
-                width: `${Math.max(0, Math.min(100, slProgress))}%`,
-                borderRadius: '2px',
-              }}
-            />
+            }} />
           </div>
         </div>
       </div>
@@ -369,37 +360,72 @@ function PositionRow({ position, index, total }: { position: Position; index: nu
       </div>
 
       {/* Actions */}
-      <div 
-        className="flex gap-1 justify-end"
-      >
+      <div style={{ 
+        display: 'flex', 
+        gap: `${TOKENS.space.xs}px`,
+        justifyContent: 'flex-end',
+      }}>
         <button
           onClick={handleClose}
-          className="flex items-center gap-1 px-2 py-1 text-text-primary-dark dark:text-text-primary-dark hover:text-text-primary-dark dark:hover:text-text-primary-dark transition-colors border border-border-dark dark:border-border-dark rounded-sm bg-transparent"
-          style={{
+          style={{ 
+            padding: `${TOKENS.space.xs}px ${TOKENS.space.sm}px`,
             fontSize: `${TOKENS.type.xs}px`,
+            borderRadius: `${TOKENS.space.sm}px`,
+            border: '1px solid rgba(35, 39, 52, 1)', // border
+            backgroundColor: 'transparent',
+            color: 'rgb(255, 255, 255)', // textPrimary
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: `${TOKENS.space.xs}px`,
+            transition: 'background-color 0.15s ease',
           }}
+          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(35, 39, 52, 0.4)'}
+          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
         >
-          <X className="w-3 h-3" />
+          <X size={12} />
           Close
         </button>
         <button
           onClick={handleTP}
-          className="flex items-center gap-1 px-2 py-1 text-text-primary-dark dark:text-text-primary-dark hover:text-text-primary-dark dark:hover:text-text-primary-dark transition-colors border border-border-dark dark:border-border-dark rounded-sm bg-transparent"
-          style={{
+          style={{ 
+            padding: `${TOKENS.space.xs}px ${TOKENS.space.sm}px`,
             fontSize: `${TOKENS.type.xs}px`,
+            borderRadius: `${TOKENS.space.sm}px`,
+            border: '1px solid rgba(35, 39, 52, 1)', // border
+            backgroundColor: 'transparent',
+            color: 'rgb(255, 255, 255)', // textPrimary
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: `${TOKENS.space.xs}px`,
+            transition: 'background-color 0.15s ease',
           }}
+          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(35, 39, 52, 0.4)'}
+          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
         >
-          <Target className="w-3 h-3" />
+          <Target size={12} />
           TP
         </button>
         <button
           onClick={handleSL}
-          className="flex items-center gap-1 px-2 py-1 text-text-primary-dark dark:text-text-primary-dark hover:text-text-primary-dark dark:hover:text-text-primary-dark transition-colors border border-border-dark dark:border-border-dark rounded-sm bg-transparent"
-          style={{
+          style={{ 
+            padding: `${TOKENS.space.xs}px ${TOKENS.space.sm}px`,
             fontSize: `${TOKENS.type.xs}px`,
+            borderRadius: `${TOKENS.space.sm}px`,
+            border: '1px solid rgba(35, 39, 52, 1)', // border
+            backgroundColor: 'transparent',
+            color: 'rgb(255, 255, 255)', // textPrimary
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: `${TOKENS.space.xs}px`,
+            transition: 'background-color 0.15s ease',
           }}
+          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(35, 39, 52, 0.4)'}
+          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
         >
-          <StopCircle className="w-3 h-3" />
+          <StopCircle size={12} />
           SL
         </button>
       </div>
@@ -535,43 +561,46 @@ export function Positions() {
 
   return (
     <div>
-      <div 
-        className="flex items-center justify-between mb-4"
-      >
-        <h2 
-          className="text-text-primary-dark dark:text-text-primary-dark"
-          style={{ 
-            fontSize: `${TOKENS.type.lg}px`,
-          }}
-        >
+      <div style={{ 
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: `${TOKENS.space.lg}px`,
+      }}>
+        <h2 style={{ 
+          fontSize: `${TOKENS.type.lg}px`,
+          color: 'rgb(255, 255, 255)', // textPrimary
+        }}>
           Open Positions
         </h2>
-        <span 
-          className="text-text-secondary-dark dark:text-text-secondary-dark"
-          style={{ 
-            fontSize: `${TOKENS.type.xs}px`,
-          }}
-        >
+        <span style={{ 
+          fontSize: `${TOKENS.type.xs}px`,
+          color: 'rgb(169, 175, 195)', // textSecondary
+        }}>
           {positions.length} active
         </span>
       </div>
 
       {/* Desktop Table View - CSS Grid */}
-      <div 
-        className="bg-surface-dark dark:bg-surface-dark border border-border-dark dark:border-border-dark rounded-12 overflow-hidden"
-      >
+      <div style={{ 
+        backgroundColor: 'rgb(28, 31, 41)', // surface
+        border: '1px solid rgba(35, 39, 52, 1)', // border
+        borderRadius: `${TOKENS.radius.md}px`,
+        overflow: 'hidden',
+      }}>
         {/* Header */}
-        <div 
-          className="grid gap-4 border-b border-border-dark dark:border-border-dark bg-surface-dark/50"
-          style={{
-            gridTemplateColumns: '2fr 0.6fr 1fr 0.8fr 1.2fr 0.8fr 0.6fr 2fr',
-            padding: `${TOKENS.space.md}px ${TOKENS.space.lg}px`,
-            fontSize: `${TOKENS.type.xs}px`,
-            color: 'rgb(169, 175, 195)', // textSecondary
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-          }}
-        >
+        <div style={{ 
+          display: 'grid',
+          gridTemplateColumns: '2fr 0.6fr 1fr 0.8fr 1.2fr 0.8fr 0.6fr 2fr',
+          gap: `${TOKENS.space.lg}px`,
+          padding: `${TOKENS.space.md}px ${TOKENS.space.lg}px`,
+          borderBottom: '1px solid rgba(35, 39, 52, 1)', // border
+          backgroundColor: 'rgba(28, 31, 41, 0.5)', // surface + 50 opacity
+          fontSize: `${TOKENS.type.xs}px`,
+          color: 'rgb(169, 175, 195)', // textSecondary
+          textTransform: 'uppercase',
+          letterSpacing: '0.05em',
+        }}>
           <div>Symbol / Strategy</div>
           <div>Qty</div>
           <div>Entry</div>
