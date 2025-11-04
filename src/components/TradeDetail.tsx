@@ -4,7 +4,7 @@ import { X, Clock, TrendingUp, TrendingDown, Target, StopCircle, ChevronRight } 
 import { motion, AnimatePresence } from 'motion/react';
 import type { TradeHistoryRecord } from '@/lib/tradeHistoryService';
 import { TradeState } from '@/lib/tradeStateMachine';
-import type { TradeHistory } from '@/components/views/History';
+import type { TradeHistory } from '@/types/tradeHistory';
 
 interface TradeDetailProps {
   trade: TradeHistory;
