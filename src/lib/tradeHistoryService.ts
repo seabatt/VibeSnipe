@@ -262,12 +262,12 @@ class TradeHistoryService {
         if (!record.entryOrder || record.entryOrder.orderId !== order.id) {
           record.entryOrder = {
             orderId: order.id,
-            clientOrderId: order.clientOrderId || '',
+            clientOrderId: (order as any).clientOrderId || order.id, // Use order ID as fallback
             status: order.status || 'UNKNOWN',
             quantity: order.quantity || 0,
-            limitPrice: order.limitPrice,
-            fillPrice: order.fillPrice,
-            filledAt: order.filledAt,
+            limitPrice: (order as any).limitPrice,
+            fillPrice: (order as any).fillPrice,
+            filledAt: order.updatedAt || order.createdAt, // Use updatedAt as filledAt if available
             netPrice: order.netPrice,
           };
           

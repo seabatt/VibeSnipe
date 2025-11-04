@@ -196,22 +196,7 @@ export async function executeTradeLifecycle(
     throw new Error(errorMsg);
   }
 
-  // Transition to SUBMITTED
-  try {
-    trade = transitionState(trade.id, TradeState.SUBMITTED);
-    logger.info('Trade transitioned to SUBMITTED', { tradeId: trade.id });
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : 'Invalid state transition';
-    logger.error('Failed to transition to SUBMITTED', { tradeId: trade.id }, error as Error);
-    trade = transitionState(trade.id, TradeState.ERROR, errorMsg);
-    return {
-      trade,
-      success: false,
-      error: errorMsg,
-    };
-  }
-
-  // Build execution intent
+  // Build execution intent (needed for submission and history)
   const executionIntent: TradeExecutionIntent = {
     tradeId: trade.id,
     legs: intent.legs,
@@ -223,6 +208,28 @@ export async function executeTradeLifecycle(
     verticalLegs,
     metadata: intent.metadata,
   };
+  
+  // Persist trade immediately (even in PENDING state)
+  await tradeHistoryService.saveTrade(trade, executionIntent);
+
+  // Transition to SUBMITTED
+  try {
+    trade = transitionState(trade.id, TradeState.SUBMITTED);
+    logger.info('Trade transitioned to SUBMITTED', { tradeId: trade.id });
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Invalid state transition';
+    logger.error('Failed to transition to SUBMITTED', { tradeId: trade.id }, error as Error);
+    trade = transitionState(trade.id, TradeState.ERROR, errorMsg);
+    
+    // Persist error state
+    await tradeHistoryService.saveTrade(trade, executionIntent);
+    
+    return {
+      trade,
+      success: false,
+      error: errorMsg,
+    };
+  }
 
   // Submit order
   let submitResult: SubmitResult;
@@ -446,10 +453,14 @@ export async function cancelTrade(
 
   if (cancelResult.success) {
     trade = transitionState(tradeId, TradeState.CANCELLED);
+    // Persist updated trade state
+    await tradeHistoryService.saveTrade(trade);
     logger.info('Trade cancelled', { tradeId, orderId });
   } else {
     const errorMsg = cancelResult.error || 'Failed to cancel order';
     trade = transitionState(tradeId, TradeState.ERROR, errorMsg);
+    // Persist updated trade state
+    await tradeHistoryService.saveTrade(trade);
     logger.error('Trade cancellation failed', { tradeId, orderId }, new Error(errorMsg));
   }
 
@@ -515,9 +526,24 @@ export async function closeTrade(
   }
 
   // Execute close
-  await executeClosePosition(positionId, accountId, tradeId, exitParams);
+  const closeResult = await executeClosePosition(positionId, accountId, tradeId, exitParams);
 
   trade = transitionState(tradeId, TradeState.CLOSED);
+  
+  // Update exit order in history
+  if (closeResult.order) {
+    await tradeHistoryService.updateExitOrder(tradeId, {
+      orderId: closeResult.order.id,
+      status: closeResult.order.status || 'FILLED',
+      fillPrice: closeResult.order.netPrice,
+      filledAt: closeResult.order.updatedAt || new Date().toISOString(),
+      exitType: 'manual', // Could be enhanced to detect TP/SL
+    });
+  }
+  
+  // Persist updated trade state
+  await tradeHistoryService.saveTrade(trade);
+  
   logger.info('Trade closed', { tradeId, positionId });
 
   return trade;

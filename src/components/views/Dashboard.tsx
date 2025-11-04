@@ -472,10 +472,10 @@ function TradingBlocks({ blocks, currentBlock, now, getTimeRemaining, isMobile, 
       gap: `${tokens.space.md}px`,
     }}>
       {blocks.map((block) => {
-        const [startHour, startMin] = (block.time || '09:30').split(':').map(Number);
+        const [startHour, startMin] = block.windowStart.split(':').map(Number);
         const startMinutes = startHour * 60 + startMin;
-        const endMinutes = startMinutes + 30; // 30-minute blocks
-        const blockEndTime = `${String(Math.floor(endMinutes / 60)).padStart(2, '0')}:${String(endMinutes % 60).padStart(2, '0')}`;
+        const [endHour, endMin] = block.windowEnd.split(':').map(Number);
+        const endMinutes = endHour * 60 + endMin;
         
         const isActive = currentMinutes >= startMinutes && currentMinutes < endMinutes;
         const isPast = currentMinutes >= endMinutes;
@@ -508,7 +508,7 @@ function TradingBlocks({ blocks, currentBlock, now, getTimeRemaining, isMobile, 
               fontVariantNumeric: 'tabular-nums',
               marginBottom: `${tokens.space.xs}px`,
             }}>
-              <span>{block.time || '09:30'}-{blockEndTime}</span>
+              <span>{block.windowStart}-{block.windowEnd}</span>
               <div style={{
                 width: '8px',
                 height: '8px',
@@ -547,7 +547,7 @@ function TradingBlocks({ blocks, currentBlock, now, getTimeRemaining, isMobile, 
                     border: `1px solid ${colors.semantic.info}40`,
                   }}
                 >
-                  Active · {getTimeRemaining(blockEndTime)}
+                  Active · {getTimeRemaining(block.windowEnd)}
                 </span>
               </div>
             )}

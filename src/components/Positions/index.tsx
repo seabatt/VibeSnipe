@@ -3,8 +3,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Position } from '@/types';
 import { X, Target, StopCircle } from 'lucide-react';
-import { updateTPOrder, updateSLOrder, cancelTPOrder, cancelSLOrder, calculateTPPrice, calculateSLPrice } from '@/lib/tastytrade/orders';
+import { updateTPOrder, updateSLOrder, cancelTPOrder, cancelSLOrder, calculateTPPrice, calculateSLPrice, submitNewTPOrder, submitNewSLOrder, buildExitLegs } from '@/lib/tastytrade/orders';
 import { orderRegistry } from '@/lib/orderRegistry';
+import type { OrderLeg } from '@/lib/tastytrade/types';
 
 // Design tokens matching Figma
 const TOKENS = {
@@ -178,37 +179,93 @@ function PositionRow({ position, index, total }: { position: Position; index: nu
       const currentTPPrice = calculateTPPrice(position.avgPrice, position.ruleBundle.takeProfitPct || 0);
       
       // Show modal/dropdown to modify TP order
-      // For now, simple prompt - would be replaced with proper UI
-      const newTPPriceStr = prompt(
+      // For now, simple prompt with action selection - would be replaced with proper UI
+      const action = prompt(
         `Take Profit Order\n\n` +
         `Current TP Price: $${currentTPPrice.toFixed(2)}\n` +
         `Current TP %: ${position.ruleBundle.takeProfitPct || 0}%\n` +
         `Order ID: ${otocoGroup.tpOrderId}\n\n` +
-        `Enter new TP price:`
+        `Choose action:\n` +
+        `1 - Update price\n` +
+        `2 - Cancel order\n` +
+        `3 - Set new order\n\n` +
+        `Enter 1, 2, or 3:`
       );
       
-      if (newTPPriceStr) {
-        const newTPPrice = parseFloat(newTPPriceStr);
-        if (!isNaN(newTPPrice) && newTPPrice > 0) {
+      if (!action) return;
+      
+      if (action === '1') {
+        // Update existing order
+        const newTPPriceStr = prompt(`Enter new TP price:`);
+        if (newTPPriceStr) {
+          const newTPPrice = parseFloat(newTPPriceStr);
+          if (!isNaN(newTPPrice) && newTPPrice > 0) {
+            try {
+              await updateTPOrder(otocoGroup.tpOrderId, newTPPrice, otocoGroup.accountId);
+              console.log('TP order updated:', newTPPrice);
+              alert(`Take profit order updated to $${newTPPrice.toFixed(2)}`);
+              // TODO: Show success notification via toast
+              // TODO: Refresh positions list
+            } catch (updateError) {
+              const errorMessage = updateError instanceof Error ? updateError.message : 'Unknown error';
+              console.error('Failed to update TP order:', updateError);
+              alert(`Failed to update take profit order: ${errorMessage}`);
+              // TODO: Show error notification via toast
+            }
+          } else {
+            alert('Invalid price. Please enter a positive number.');
+          }
+        }
+      } else if (action === '2') {
+        // Cancel existing order
+        if (confirm('Are you sure you want to cancel the take profit order?')) {
           try {
-            await updateTPOrder(otocoGroup.tpOrderId, newTPPrice, otocoGroup.accountId);
-            console.log('TP order updated:', newTPPrice);
-            alert(`Take profit order updated to $${newTPPrice.toFixed(2)}`);
+            await cancelTPOrder(otocoGroup.tpOrderId, otocoGroup.accountId);
+            console.log('TP order cancelled');
+            alert('Take profit order cancelled');
             // TODO: Show success notification via toast
             // TODO: Refresh positions list
-          } catch (updateError) {
-            const errorMessage = updateError instanceof Error ? updateError.message : 'Unknown error';
-            console.error('Failed to update TP order:', updateError);
-            alert(`Failed to update take profit order: ${errorMessage}`);
+          } catch (cancelError) {
+            const errorMessage = cancelError instanceof Error ? cancelError.message : 'Unknown error';
+            console.error('Failed to cancel TP order:', cancelError);
+            alert(`Failed to cancel take profit order: ${errorMessage}`);
             // TODO: Show error notification via toast
           }
-        } else {
-          alert('Invalid price. Please enter a positive number.');
+        }
+      } else if (action === '3') {
+        // Set new order (cancel old and create new)
+        const newTPPriceStr = prompt(`Enter new TP price:`);
+        if (newTPPriceStr) {
+          const newTPPrice = parseFloat(newTPPriceStr);
+          if (!isNaN(newTPPrice) && newTPPrice > 0) {
+            try {
+              // Build exit legs from entry legs
+              const exitLegs = buildExitLegs(otocoGroup.entryLegs as OrderLeg[]);
+              const newTPOrder = await submitNewTPOrder(exitLegs, newTPPrice, otocoGroup.accountId, otocoGroup.tpOrderId);
+              console.log('New TP order submitted:', newTPPrice);
+              
+              // Update registry with new TP order ID
+              await orderRegistry.updateOTOCOGroup(position.id, {
+                tpOrderId: newTPOrder.id,
+              });
+              
+              alert(`New take profit order set at $${newTPPrice.toFixed(2)}`);
+              // TODO: Show success notification via toast
+              // TODO: Refresh positions list
+            } catch (newOrderError) {
+              const errorMessage = newOrderError instanceof Error ? newOrderError.message : 'Unknown error';
+              console.error('Failed to set new TP order:', newOrderError);
+              alert(`Failed to set new take profit order: ${errorMessage}`);
+              // TODO: Show error notification via toast
+            }
+          } else {
+            alert('Invalid price. Please enter a positive number.');
+          }
         }
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error('Failed to update TP order:', error);
+      console.error('Failed to handle TP order:', error);
       alert(`Error: ${errorMessage}`);
       // TODO: Show error notification via toast
     }
@@ -237,37 +294,93 @@ function PositionRow({ position, index, total }: { position: Position; index: nu
       const currentSLPrice = calculateSLPrice(position.avgPrice, position.ruleBundle.stopLossPct || 0);
       
       // Show modal/dropdown to modify SL order
-      // For now, simple prompt - would be replaced with proper UI
-      const newSLPriceStr = prompt(
+      // For now, simple prompt with action selection - would be replaced with proper UI
+      const action = prompt(
         `Stop Loss Order\n\n` +
         `Current SL Price: $${currentSLPrice.toFixed(2)}\n` +
         `Current SL %: ${position.ruleBundle.stopLossPct || 0}%\n` +
         `Order ID: ${otocoGroup.slOrderId}\n\n` +
-        `Enter new SL price:`
+        `Choose action:\n` +
+        `1 - Update price\n` +
+        `2 - Cancel order\n` +
+        `3 - Set new order\n\n` +
+        `Enter 1, 2, or 3:`
       );
       
-      if (newSLPriceStr) {
-        const newSLPrice = parseFloat(newSLPriceStr);
-        if (!isNaN(newSLPrice) && newSLPrice > 0) {
+      if (!action) return;
+      
+      if (action === '1') {
+        // Update existing order
+        const newSLPriceStr = prompt(`Enter new SL price:`);
+        if (newSLPriceStr) {
+          const newSLPrice = parseFloat(newSLPriceStr);
+          if (!isNaN(newSLPrice) && newSLPrice > 0) {
+            try {
+              await updateSLOrder(otocoGroup.slOrderId, newSLPrice, otocoGroup.accountId);
+              console.log('SL order updated:', newSLPrice);
+              alert(`Stop loss order updated to $${newSLPrice.toFixed(2)}`);
+              // TODO: Show success notification via toast
+              // TODO: Refresh positions list
+            } catch (updateError) {
+              const errorMessage = updateError instanceof Error ? updateError.message : 'Unknown error';
+              console.error('Failed to update SL order:', updateError);
+              alert(`Failed to update stop loss order: ${errorMessage}`);
+              // TODO: Show error notification via toast
+            }
+          } else {
+            alert('Invalid price. Please enter a positive number.');
+          }
+        }
+      } else if (action === '2') {
+        // Cancel existing order
+        if (confirm('Are you sure you want to cancel the stop loss order?')) {
           try {
-            await updateSLOrder(otocoGroup.slOrderId, newSLPrice, otocoGroup.accountId);
-            console.log('SL order updated:', newSLPrice);
-            alert(`Stop loss order updated to $${newSLPrice.toFixed(2)}`);
+            await cancelSLOrder(otocoGroup.slOrderId, otocoGroup.accountId);
+            console.log('SL order cancelled');
+            alert('Stop loss order cancelled');
             // TODO: Show success notification via toast
             // TODO: Refresh positions list
-          } catch (updateError) {
-            const errorMessage = updateError instanceof Error ? updateError.message : 'Unknown error';
-            console.error('Failed to update SL order:', updateError);
-            alert(`Failed to update stop loss order: ${errorMessage}`);
+          } catch (cancelError) {
+            const errorMessage = cancelError instanceof Error ? cancelError.message : 'Unknown error';
+            console.error('Failed to cancel SL order:', cancelError);
+            alert(`Failed to cancel stop loss order: ${errorMessage}`);
             // TODO: Show error notification via toast
           }
-        } else {
-          alert('Invalid price. Please enter a positive number.');
+        }
+      } else if (action === '3') {
+        // Set new order (cancel old and create new)
+        const newSLPriceStr = prompt(`Enter new SL price:`);
+        if (newSLPriceStr) {
+          const newSLPrice = parseFloat(newSLPriceStr);
+          if (!isNaN(newSLPrice) && newSLPrice > 0) {
+            try {
+              // Build exit legs from entry legs
+              const exitLegs = buildExitLegs(otocoGroup.entryLegs as OrderLeg[]);
+              const newSLOrder = await submitNewSLOrder(exitLegs, newSLPrice, otocoGroup.accountId, otocoGroup.slOrderId);
+              console.log('New SL order submitted:', newSLPrice);
+              
+              // Update registry with new SL order ID
+              await orderRegistry.updateOTOCOGroup(position.id, {
+                slOrderId: newSLOrder.id,
+              });
+              
+              alert(`New stop loss order set at $${newSLPrice.toFixed(2)}`);
+              // TODO: Show success notification via toast
+              // TODO: Refresh positions list
+            } catch (newOrderError) {
+              const errorMessage = newOrderError instanceof Error ? newOrderError.message : 'Unknown error';
+              console.error('Failed to set new SL order:', newOrderError);
+              alert(`Failed to set new stop loss order: ${errorMessage}`);
+              // TODO: Show error notification via toast
+            }
+          } else {
+            alert('Invalid price. Please enter a positive number.');
+          }
         }
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error('Failed to update SL order:', error);
+      console.error('Failed to handle SL order:', error);
       alert(`Error: ${errorMessage}`);
       // TODO: Show error notification via toast
     }

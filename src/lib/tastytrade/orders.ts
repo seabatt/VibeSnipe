@@ -709,6 +709,29 @@ export function calculateSLPrice(entryPrice: number, slPct: number): number {
 }
 
 /**
+ * Builds OTOCO JSON structure internally for Tastytrade API.
+ * 
+ * This structure represents the complete OTOCO order but is built internally.
+ * Orders are submitted sequentially: trigger first, then TP/SL after fill.
+ * 
+ * @param {TriggerOrderPayload} triggerOrder - The trigger order payload
+ * @param {any} tpOrder - Take profit order payload
+ * @param {any} slOrder - Stop loss order payload
+ * @returns {OTOCOOrderPayload} Complete OTOCO order structure
+ */
+export function buildOTOCOPayload(
+  triggerOrder: any,
+  tpOrder: any,
+  slOrder: any
+): any {
+  return {
+    type: 'OTOCO',
+    'trigger-order': triggerOrder,
+    orders: [tpOrder, slOrder],
+  };
+}
+
+/**
  * Builds exit leg orders from entry legs (reverses actions).
  * 
  * @param {OrderLeg[]} entryLegs - Entry order legs
@@ -1267,5 +1290,83 @@ export async function cancelSLOrder(
   accountId: string
 ): Promise<void> {
   return await cancelOrder(slOrderId, accountId);
+}
+
+/**
+ * Submits a new take profit order to replace an existing one.
+ * 
+ * Cancels the old TP order and submits a new one. Useful when the old order
+ * cannot be modified or when replacing with a completely different order.
+ * 
+ * @param {OrderLeg[]} exitLegs - Exit order legs (reversed from entry)
+ * @param {number} tpPrice - Take profit price
+ * @param {string} accountId - Account ID
+ * @param {string} oldTpOrderId - Old TP order ID to cancel (optional)
+ * @param {'GTC' | 'DAY' | 'EXT' | 'IOC' | 'FOK'} timeInForce - Time in force
+ * @returns {Promise<AppOrder>} The new TP order
+ * @throws {Error} If submission fails
+ */
+export async function submitNewTPOrder(
+  exitLegs: OrderLeg[],
+  tpPrice: number,
+  accountId: string,
+  oldTpOrderId?: string,
+  timeInForce: 'GTC' | 'DAY' | 'EXT' | 'IOC' | 'FOK' = 'GTC'
+): Promise<AppOrder> {
+  // Cancel old order if provided
+  if (oldTpOrderId) {
+    try {
+      await cancelTPOrder(oldTpOrderId, accountId);
+      logger.info('Old TP order cancelled', { oldTpOrderId, accountId });
+    } catch (error) {
+      // Log error but continue - the old order might already be filled/cancelled
+      logger.warn('Failed to cancel old TP order, continuing with new submission', {
+        oldTpOrderId,
+        accountId,
+      }, error as Error);
+    }
+  }
+
+  // Submit new TP order
+  return await submitTPOrder(exitLegs, tpPrice, accountId, timeInForce);
+}
+
+/**
+ * Submits a new stop loss order to replace an existing one.
+ * 
+ * Cancels the old SL order and submits a new one. Useful when the old order
+ * cannot be modified or when replacing with a completely different order.
+ * 
+ * @param {OrderLeg[]} exitLegs - Exit order legs (reversed from entry)
+ * @param {number} slPrice - Stop loss price (stop-trigger)
+ * @param {string} accountId - Account ID
+ * @param {string} oldSlOrderId - Old SL order ID to cancel (optional)
+ * @param {'GTC' | 'DAY' | 'EXT' | 'IOC' | 'FOK'} timeInForce - Time in force
+ * @returns {Promise<AppOrder>} The new SL order
+ * @throws {Error} If submission fails
+ */
+export async function submitNewSLOrder(
+  exitLegs: OrderLeg[],
+  slPrice: number,
+  accountId: string,
+  oldSlOrderId?: string,
+  timeInForce: 'GTC' | 'DAY' | 'EXT' | 'IOC' | 'FOK' = 'GTC'
+): Promise<AppOrder> {
+  // Cancel old order if provided
+  if (oldSlOrderId) {
+    try {
+      await cancelSLOrder(oldSlOrderId, accountId);
+      logger.info('Old SL order cancelled', { oldSlOrderId, accountId });
+    } catch (error) {
+      // Log error but continue - the old order might already be filled/cancelled
+      logger.warn('Failed to cancel old SL order, continuing with new submission', {
+        oldSlOrderId,
+        accountId,
+      }, error as Error);
+    }
+  }
+
+  // Submit new SL order
+  return await submitSLOrder(exitLegs, slPrice, accountId, timeInForce);
 }
 
