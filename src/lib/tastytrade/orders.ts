@@ -1323,7 +1323,8 @@ export async function submitNewTPOrder(
       logger.warn('Failed to cancel old TP order, continuing with new submission', {
         oldTpOrderId,
         accountId,
-      }, error as Error);
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -1362,7 +1363,8 @@ export async function submitNewSLOrder(
       logger.warn('Failed to cancel old SL order, continuing with new submission', {
         oldSlOrderId,
         accountId,
-      }, error as Error);
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
