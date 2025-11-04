@@ -50,8 +50,8 @@ function determineExitReason(record: TradeHistoryRecord): 'TP' | 'SL' | 'TIME' |
     if (record.exitOrder.exitType === 'manual') return 'MANUAL';
   }
   
-  // Check if there's a time exit in rule bundle
-  if (record.ruleBundle?.timeExit) {
+  // Check metadata for time exit indicator
+  if (record.metadata?.timeExit || record.metadata?.exitReason === 'TIME') {
     return 'TIME';
   }
   
