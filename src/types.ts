@@ -16,8 +16,8 @@ export interface TradeLeg {
 }
 
 export interface RuleBundle {
-  takeProfitPct: number; // 50 = +50%
-  stopLossPct: number;   // 100 = -100%
+  takeProfitPct: number | null; // null = not set, 50 = +50%
+  stopLossPct: number | null;   // null = not set, 100 = -100%
   timeExit?: string;     // "13:00"
 }
 

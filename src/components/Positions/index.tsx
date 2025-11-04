@@ -166,23 +166,35 @@ function PositionRow({ position, index, total }: { position: Position; index: nu
   // Calculate TP/SL progress using exact Figma formula
   // TP: ((current - entry) / (target - entry)) * 100
   // SL: ((entry - current) / (entry - stop)) * 100
+  // Check if TP/SL is actually set
+  const hasTP = position.ruleBundle.takeProfitPct != null;
+  const hasSL = position.ruleBundle.stopLossPct != null;
+  
   // Calculate current price from P/L
   const multiplier = position.strategy === 'SPOT' ? 1 : 100;
   const currentPrice = position.avgPrice + (position.pnl / (position.qty * multiplier));
   
-  // Calculate target and stop prices from ruleBundle percentages
-  const targetPrice = position.avgPrice * (1 + position.ruleBundle.takeProfitPct / 100);
-  const stopPrice = position.avgPrice * (1 - position.ruleBundle.stopLossPct / 100);
+  // Only calculate progress if TP/SL is set
+  let tpProgress = 0;
+  let slProgress = 0;
   
-  // TP progress: how far towards target
-  const tpProgress = targetPrice > position.avgPrice
-    ? Math.max(0, Math.min(100, ((currentPrice - position.avgPrice) / (targetPrice - position.avgPrice)) * 100))
-    : 0;
+  if (hasTP) {
+    // Calculate target price from ruleBundle percentage
+    const targetPrice = position.avgPrice * (1 + position.ruleBundle.takeProfitPct! / 100);
+    // TP progress: how far towards target
+    tpProgress = targetPrice > position.avgPrice
+      ? Math.max(0, Math.min(100, ((currentPrice - position.avgPrice) / (targetPrice - position.avgPrice)) * 100))
+      : 0;
+  }
   
-  // SL progress: how far towards stop
-  const slProgress = stopPrice < position.avgPrice
-    ? Math.max(0, Math.min(100, ((position.avgPrice - currentPrice) / (position.avgPrice - stopPrice)) * 100))
-    : 0;
+  if (hasSL) {
+    // Calculate stop price from ruleBundle percentage
+    const stopPrice = position.avgPrice * (1 - position.ruleBundle.stopLossPct! / 100);
+    // SL progress: how far towards stop
+    slProgress = stopPrice < position.avgPrice
+      ? Math.max(0, Math.min(100, ((position.avgPrice - currentPrice) / (position.avgPrice - stopPrice)) * 100))
+      : 0;
+  }
 
   // Generate curve data (simplified - would need actual historical data)
   const curveData = position.pnl >= 0 
@@ -284,15 +296,17 @@ function PositionRow({ position, index, total }: { position: Position; index: nu
             position: 'relative',
             overflow: 'hidden',
           }}>
-            <div style={{ 
-              position: 'absolute',
-              left: 0,
-              top: 0,
-              bottom: 0,
-              width: `${Math.max(0, Math.min(100, tpProgress))}%`,
-              backgroundColor: TOKENS.color.semantic.profit,
-              borderRadius: '2px',
-            }} />
+            {hasTP && (
+              <div style={{ 
+                position: 'absolute',
+                left: 0,
+                top: 0,
+                bottom: 0,
+                width: `${Math.max(0, Math.min(100, tpProgress))}%`,
+                backgroundColor: TOKENS.color.semantic.profit,
+                borderRadius: '2px',
+              }} />
+            )}
           </div>
         </div>
         {/* SL Bar */}
@@ -312,15 +326,17 @@ function PositionRow({ position, index, total }: { position: Position; index: nu
             position: 'relative',
             overflow: 'hidden',
           }}>
-            <div style={{ 
-              position: 'absolute',
-              left: 0,
-              top: 0,
-              bottom: 0,
-              width: `${Math.max(0, Math.min(100, slProgress))}%`,
-              backgroundColor: TOKENS.color.semantic.risk,
-              borderRadius: '2px',
-            }} />
+            {hasSL && (
+              <div style={{ 
+                position: 'absolute',
+                left: 0,
+                top: 0,
+                bottom: 0,
+                width: `${Math.max(0, Math.min(100, slProgress))}%`,
+                backgroundColor: TOKENS.color.semantic.risk,
+                borderRadius: '2px',
+              }} />
+            )}
           </div>
         </div>
       </div>

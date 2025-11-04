@@ -249,8 +249,8 @@ export async function GET() {
         avgPrice: averageOpenPrice,
         pnl: pnl,
         ruleBundle: {
-          takeProfitPct: 50, // Default
-          stopLossPct: 100, // Default
+          takeProfitPct: null, // Not set by default - will be set if actually configured
+          stopLossPct: null, // Not set by default - will be set if actually configured
         },
         state: 'FILLED' as const,
         openedAt: pos['created-at'] || pos.createdAt || pos.openedAt || new Date().toISOString(),
