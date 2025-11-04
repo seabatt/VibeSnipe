@@ -327,7 +327,7 @@ export function Dashboard() {
                   fontVariantNumeric: 'tabular-nums',
                   textAlign: 'left',
                 }}>
-                  {wins}W / {losses}L
+                  {todayWins}W / {todayLosses}L
                 </div>
               </div>
 
