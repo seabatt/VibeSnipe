@@ -225,13 +225,28 @@ class TradeHistoryService {
           createdAt: trade.createdAt,
           updatedAt: trade.updatedAt,
           orderIds: [],
-          legs: intent?.legs?.map(leg => ({
-            symbol: leg.symbol || '',
-            instrumentType: leg.instrumentType || 'option',
-            quantity: leg.quantity || 0,
-            action: leg.action || 'BUY_TO_OPEN',
-            price: leg.price,
-          })) || [],
+          legs: intent?.legs?.map(leg => {
+            // Construct symbol from TradeLeg properties
+            // Format: {STRIKE}{RIGHT}{EXPIRY_SHORT}
+            const expiryDate = new Date(leg.expiry);
+            const year = expiryDate.getFullYear().toString().slice(-2);
+            const month = (expiryDate.getMonth() + 1).toString().padStart(2, '0');
+            const day = expiryDate.getDate().toString().padStart(2, '0');
+            const rightChar = leg.right === 'PUT' ? 'P' : 'C';
+            const strikeStr = Math.round(leg.strike * 1000).toString().padStart(8, '0');
+            const symbol = `${year}${month}${day}${rightChar}${strikeStr}`;
+            
+            // Map action from TradeLeg format to TradeHistoryRecord format
+            const action = leg.action === 'BUY' ? 'BUY_TO_OPEN' : 'SELL_TO_OPEN';
+            
+            return {
+              symbol,
+              instrumentType: 'option',
+              quantity: leg.quantity || 0,
+              action,
+              price: leg.price,
+            };
+          }) || [],
           quantity: intent?.quantity || 0,
           accountId: intent?.accountId || '',
           strategy: {
