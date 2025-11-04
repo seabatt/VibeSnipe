@@ -93,14 +93,6 @@ export function Dashboard() {
     return isWeekday && currentMinutes >= marketOpen && currentMinutes < marketClose;
   };
 
-  // Helper function to convert 24-hour to 12-hour format
-  const formatTo12Hour = (time24: string): string => {
-    const [hours, minutes] = time24.split(':').map(Number);
-    const period = hours >= 12 ? 'PM' : 'AM';
-    const hour12 = hours % 12 || 12; // Convert 0 to 12, 13 to 1, etc.
-    return `${hour12}:${String(minutes).padStart(2, '0')} ${period}`;
-  };
-
   if (!mounted) {
     return (
       <div style={{ 
@@ -410,6 +402,14 @@ interface TradingBlocksProps {
 
 function TradingBlocks({ blocks, currentBlock, nextBlock, now, getTimeRemaining, isMobile, tokens, colors, positions, isMarketOpen }: TradingBlocksProps) {
   const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+  // Helper function to convert 24-hour to 12-hour format
+  const formatTo12Hour = (time24: string): string => {
+    const [hours, minutes] = time24.split(':').map(Number);
+    const period = hours >= 12 ? 'PM' : 'AM';
+    const hour12 = hours % 12 || 12; // Convert 0 to 12, 13 to 1, etc.
+    return `${hour12}:${String(minutes).padStart(2, '0')} ${period}`;
+  };
 
   // Helper function to get time until a block starts
   const getTimeUntilStart = (blockStartTime: string): string => {
