@@ -198,7 +198,8 @@ export function History() {
     // Remove duplicates by trade ID (prefer app version if duplicate)
     const tradeMap = new Map<string, TradeHistory>();
     combined.forEach(trade => {
-      if (!tradeMap.has(trade.id) || trade.originalRecord?.source === 'app') {
+      const source = trade.originalRecord?.metadata?.source || 'app';
+      if (!tradeMap.has(trade.id) || source === 'app') {
         tradeMap.set(trade.id, trade);
       }
     });
