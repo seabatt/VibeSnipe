@@ -254,7 +254,10 @@ class TradeHistoryService {
             name: intent?.metadata?.strategyName,
             source: intent?.metadata?.source,
           },
-          ruleBundle: intent?.ruleBundle,
+          ruleBundle: intent?.ruleBundle ? {
+            takeProfitPct: intent.ruleBundle.takeProfitPct ?? 0,
+            stopLossPct: intent.ruleBundle.stopLossPct ?? 0,
+          } : undefined,
           metadata: { ...trade.metadata, ...intent?.metadata },
         };
       }
