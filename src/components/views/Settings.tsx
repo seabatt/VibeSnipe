@@ -473,6 +473,13 @@ export function Settings() {
       blocks: updated
     }));
     setScheduleBlocks(updated);
+    // Update editingBlock if it's the block being edited - use the updated block from the array
+    if (editingBlock?.id === id) {
+      const updatedBlock = updated.find(b => b.id === id);
+      if (updatedBlock) {
+        setEditingBlock(updatedBlock);
+      }
+    }
   };
 
   const deleteBlock = (id: string) => {
