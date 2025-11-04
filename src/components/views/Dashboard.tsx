@@ -96,61 +96,6 @@ export function Dashboard() {
       backgroundColor: colors.bg,
       color: colors.textPrimary,
     }}>
-      {/* Header */}
-      <div style={{ 
-        maxWidth: '1400px', 
-        margin: '0 auto', 
-        padding: isMobile ? `${tokens.space.lg}px` : `${tokens.space.xl}px ${tokens.space.xl}px ${tokens.space.lg}px`,
-      }}>
-        <div style={{ 
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: isMobile ? `${tokens.space.md}px` : `${tokens.space.lg}px`,
-        }}>
-          {/* Title */}
-          <div>
-            <h1 style={{ 
-              fontSize: isMobile ? `${tokens.type.sizes.lg}px` : `${tokens.type.sizes.xl}px`,
-              color: colors.textPrimary,
-              fontWeight: tokens.type.weights.semibold,
-              margin: 0,
-              marginBottom: `${tokens.space.xs}px`,
-            }}>
-              VibeSnipe
-            </h1>
-          </div>
-
-          {/* Controls */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? `${tokens.space.sm}px` : `${tokens.space.md}px` }}>
-            {/* Account Chip */}
-            <div style={{ 
-              display: 'flex',
-              alignItems: 'center',
-              gap: `${tokens.space.sm}px`,
-              padding: isMobile ? `${tokens.space.xs}px ${tokens.space.md}px` : `${tokens.space.sm}px ${tokens.space.lg}px`,
-              backgroundColor: colors.surface,
-              border: `1px solid ${colors.border}`,
-              borderRadius: `${tokens.radius.md}px`,
-            }}>
-              <div style={{
-                width: '8px',
-                height: '8px',
-                borderRadius: '50%',
-                backgroundColor: colors.semantic.profit,
-                boxShadow: `0 0 0 2px ${colors.semantic.profit}20`,
-              }} />
-              <span style={{ 
-                fontSize: `${tokens.type.sizes.sm}px`,
-                color: colors.textPrimary,
-                fontVariantNumeric: 'tabular-nums',
-              }}>
-                {isMobile ? '#4521' : 'Account #4521'}
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
 
       <div style={{ 
         maxWidth: '1400px',
@@ -306,52 +251,29 @@ export function Dashboard() {
                   textTransform: 'uppercase',
                   letterSpacing: '0.05em',
                   marginBottom: `${tokens.space.sm}px`,
+                  textAlign: 'left',
                 }}>
                   Win Rate
                 </div>
                 
-                <div style={{ display: 'flex', alignItems: 'center', gap: `${tokens.space.lg}px` }}>
-                  <svg width="60" height="60">
-                    <circle
-                      cx="30"
-                      cy="30"
-                      r="22"
-                      fill="none"
-                      stroke={colors.semantic.risk}
-                      strokeWidth="8"
-                      strokeDasharray={`${(losses / (wins + losses || 1)) * 138.23} 138.23`}
-                    />
-                    <circle
-                      cx="30"
-                      cy="30"
-                      r="22"
-                      fill="none"
-                      stroke={colors.semantic.profit}
-                      strokeWidth="8"
-                      strokeDasharray={`${(wins / (wins + losses || 1)) * 138.23} 138.23`}
-                      strokeDashoffset={`-${(losses / (wins + losses || 1)) * 138.23}`}
-                      transform="rotate(-90 30 30)"
-                    />
-                  </svg>
-                  
-                  <div>
-                    <div style={{ 
-                      fontSize: `${tokens.type.sizes.xl}px`,
-                      color: colors.textPrimary,
-                      fontVariantNumeric: 'tabular-nums',
-                      marginBottom: `${tokens.space.xs}px`,
-                      fontWeight: tokens.type.weights.semibold,
-                    }}>
-                      {winRate.toFixed(1)}%
-                    </div>
-                    <div style={{ 
-                      fontSize: `${tokens.type.sizes.xs}px`,
-                      color: colors.textSecondary,
-                      fontVariantNumeric: 'tabular-nums',
-                    }}>
-                      {wins}W / {losses}L
-                    </div>
-                  </div>
+                <div style={{ 
+                  fontSize: `${tokens.type.sizes.xl}px`,
+                  color: colors.textPrimary,
+                  fontVariantNumeric: 'tabular-nums',
+                  marginBottom: `${tokens.space.xs}px`,
+                  fontWeight: tokens.type.weights.semibold,
+                  textAlign: 'left',
+                }}>
+                  {winRate.toFixed(1)}%
+                </div>
+                
+                <div style={{ 
+                  fontSize: `${tokens.type.sizes.xs}px`,
+                  color: colors.textSecondary,
+                  fontVariantNumeric: 'tabular-nums',
+                  textAlign: 'left',
+                }}>
+                  {wins}W / {losses}L
                 </div>
               </div>
 
@@ -436,14 +358,6 @@ export function Dashboard() {
 
           {/* Open Positions */}
           <div>
-            <h2 style={{ 
-              fontSize: `${tokens.type.sizes.lg}px`,
-              color: colors.textPrimary,
-              fontWeight: tokens.type.weights.medium,
-              marginBottom: `${tokens.space.lg}px`,
-            }}>
-              Open Positions
-            </h2>
             <Positions />
           </div>
         </div>

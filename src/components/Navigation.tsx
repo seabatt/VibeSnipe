@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Home, Sparkles, History as HistoryIcon, Settings as SettingsIcon, BookOpen, Menu, X } from 'lucide-react';
 import { useTokens } from '@/hooks/useTokens';
+import { useSettings } from '@/hooks/useSettings';
 
 type ViewId = 'home' | 'create-trade' | 'history' | 'settings' | 'library';
 
@@ -16,6 +17,7 @@ export function Navigation({ activeView, onViewChange }: NavigationProps) {
   const [isMobile, setIsMobile] = useState(false);
   const tokens = useTokens();
   const colors = tokens.colors;
+  const { settings } = useSettings();
   
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
@@ -65,6 +67,32 @@ export function Navigation({ activeView, onViewChange }: NavigationProps) {
           {/* Desktop Navigation */}
           {!isMobile && (
             <div style={{ display: 'flex', alignItems: 'center', gap: `${tokens.space.sm}px` }}>
+              {/* Account Chip */}
+              <div style={{ 
+                display: 'flex',
+                alignItems: 'center',
+                gap: `${tokens.space.sm}px`,
+                padding: `${tokens.space.sm}px ${tokens.space.lg}px`,
+                backgroundColor: colors.surface,
+                border: `1px solid ${colors.border}`,
+                borderRadius: `${tokens.radius.md}px`,
+                marginRight: `${tokens.space.sm}px`,
+              }}>
+                <div style={{
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  backgroundColor: colors.semantic.profit,
+                  boxShadow: `0 0 0 2px ${colors.semantic.profit}20`,
+                }} />
+                <span style={{ 
+                  fontSize: `${tokens.type.sizes.sm}px`,
+                  color: colors.textPrimary,
+                  fontVariantNumeric: 'tabular-nums',
+                }}>
+                  {settings.accountId ? `Account ${settings.accountId}` : 'Account #4521'}
+                </span>
+              </div>
               {views.map(({ id, label, icon: Icon }) => (
                 <button
                   key={id}
@@ -104,6 +132,31 @@ export function Navigation({ activeView, onViewChange }: NavigationProps) {
           {/* Mobile Menu Button */}
           {isMobile && (
             <div style={{ display: 'flex', alignItems: 'center', gap: `${tokens.space.md}px` }}>
+              {/* Account Chip */}
+              <div style={{ 
+                display: 'flex',
+                alignItems: 'center',
+                gap: `${tokens.space.sm}px`,
+                padding: `${tokens.space.xs}px ${tokens.space.md}px`,
+                backgroundColor: colors.surface,
+                border: `1px solid ${colors.border}`,
+                borderRadius: `${tokens.radius.md}px`,
+              }}>
+                <div style={{
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  backgroundColor: colors.semantic.profit,
+                  boxShadow: `0 0 0 2px ${colors.semantic.profit}20`,
+                }} />
+                <span style={{ 
+                  fontSize: `${tokens.type.sizes.sm}px`,
+                  color: colors.textPrimary,
+                  fontVariantNumeric: 'tabular-nums',
+                }}>
+                  {settings.accountId ? `#${settings.accountId.slice(-4)}` : '#4521'}
+                </span>
+              </div>
               <button
                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
                 style={{
