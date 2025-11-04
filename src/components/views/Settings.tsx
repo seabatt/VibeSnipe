@@ -88,7 +88,7 @@ const INITIAL_SETTINGS: SettingsData = {
     },
     { 
       id: '2', 
-      label: 'Vertical Spread (50Δ – 10 Wide)', 
+      label: 'Tasty Vertical', 
       windowStart: '10:00', 
       windowEnd: '10:30', 
       underlying: 'SPX', 

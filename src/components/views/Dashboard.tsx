@@ -93,6 +93,14 @@ export function Dashboard() {
     return isWeekday && currentMinutes >= marketOpen && currentMinutes < marketClose;
   };
 
+  // Helper function to convert 24-hour to 12-hour format
+  const formatTo12Hour = (time24: string): string => {
+    const [hours, minutes] = time24.split(':').map(Number);
+    const period = hours >= 12 ? 'PM' : 'AM';
+    const hour12 = hours % 12 || 12; // Convert 0 to 12, 13 to 1, etc.
+    return `${hour12}:${String(minutes).padStart(2, '0')} ${period}`;
+  };
+
   if (!mounted) {
     return (
       <div style={{ 
@@ -522,17 +530,21 @@ function TradingBlocks({ blocks, currentBlock, nextBlock, now, getTimeRemaining,
               border: `1px solid ${
                 isActive 
                   ? colors.semantic.info + '80' // Stronger border for active
-                  : isNext && isMarketOpen
-                    ? colors.semantic.info + '40' // Highlight next block when market is open
-                    : colors.border
+                  : isFuture && isMarketOpen
+                    ? colors.semantic.info + '60' // Blue border for upcoming blocks when market is open
+                    : isNext && isMarketOpen
+                      ? colors.semantic.info + '40' // Highlight next block when market is open
+                      : colors.border
               }`,
               backgroundColor: isActive 
                 ? colors.semantic.info + '15' // More visible background for active
-                : isNext && isMarketOpen
-                  ? colors.semantic.info + '08' // Subtle highlight for next block
-                  : isPast
-                    ? colors.surface + '40'
-                    : colors.surface,
+                : isFuture && isMarketOpen
+                  ? colors.semantic.info + '10' // Subtle background for upcoming blocks
+                  : isNext && isMarketOpen
+                    ? colors.semantic.info + '08' // Subtle highlight for next block
+                    : isPast
+                      ? colors.surface + '40'
+                      : colors.surface,
               opacity: isPast ? 0.5 : 1,
               boxShadow: isActive ? `0 0 0 2px ${colors.semantic.info}30` : 'none',
             }}
@@ -546,7 +558,7 @@ function TradingBlocks({ blocks, currentBlock, nextBlock, now, getTimeRemaining,
               fontVariantNumeric: 'tabular-nums',
               marginBottom: `${tokens.space.xs}px`,
             }}>
-              <span>{block.windowStart}-{block.windowEnd}</span>
+              <span>{formatTo12Hour(block.windowStart)} - {formatTo12Hour(block.windowEnd)}</span>
               <div style={{
                 width: '8px',
                 height: '8px',
