@@ -21,58 +21,162 @@ export async function GET(request: Request) {
     
     // Fetch transactions using transactionsService
     let transactions: any[] = [];
+    let errorDetails: any = null;
     
     try {
-      const transactionsService = client.transactionsService;
-      
-      if (typeof transactionsService.getAccountTransactions === 'function') {
-        const response = await transactionsService.getAccountTransactions(accountNumber);
-        
-        // Handle different response formats
-        transactions = response?.data?.items || response?.data || response || [];
-        
-        // Filter transactions by date if startDate is provided
-        if (startDate && transactions.length > 0) {
-          const startDateObj = new Date(startDate);
-          transactions = transactions.filter((tx: any) => {
-            const txDate = new Date(tx['transaction-date'] || tx.transactionDate || tx.date || tx.createdAt || tx['executed-at']);
-            return txDate >= startDateObj;
-          });
-        }
-        
-        // Filter for trade-related transactions only
-        transactions = transactions.filter((tx: any) => {
-          const type = tx['transaction-type'] || tx.transactionType || tx.type || '';
-          const subType = tx['transaction-sub-type'] || tx.transactionSubType || tx.subType || '';
-          
-          // Include trade-related transactions
-          return type === 'Trade' || 
-                 type === 'Fill' || 
-                 subType === 'Fill' ||
-                 subType === 'Trade' ||
-                 type.toLowerCase().includes('trade') ||
-                 subType.toLowerCase().includes('trade') ||
-                 subType.toLowerCase().includes('fill');
-        });
-        
-        logger.info('Fetched transactions successfully', {
+      // Check if transactionsService exists
+      if (!client.transactionsService) {
+        logger.warn('transactionsService is not available on client', {
           accountNumber,
-          totalTransactions: transactions.length,
-          startDate,
+          availableServices: Object.keys(client).filter(key => key.includes('Service')),
         });
+        errorDetails = {
+          error: 'transactionsService not available',
+          availableServices: Object.keys(client).filter(key => key.includes('Service')),
+        };
       } else {
-        logger.warn('transactionsService.getAccountTransactions is not available', {
+        const transactionsService = client.transactionsService;
+        const availableMethods = Object.keys(transactionsService || {});
+        
+        logger.info('Checking transactionsService methods', {
           accountNumber,
-          availableMethods: Object.keys(transactionsService || {}),
+          availableMethods,
+          hasGetAccountTransactions: typeof transactionsService.getAccountTransactions === 'function',
         });
+        
+        if (typeof transactionsService.getAccountTransactions === 'function') {
+          try {
+            const response = await transactionsService.getAccountTransactions(accountNumber);
+            
+            logger.info('Raw transactionsService response', {
+              accountNumber,
+              responseType: typeof response,
+              hasData: !!response?.data,
+              responseKeys: response ? Object.keys(response) : [],
+              dataKeys: response?.data ? Object.keys(response.data) : [],
+              isArray: Array.isArray(response),
+              isArrayData: Array.isArray(response?.data),
+            });
+            
+            // Handle different response formats
+            transactions = response?.data?.items || response?.data || response || [];
+            
+            if (!Array.isArray(transactions)) {
+              logger.warn('Transactions is not an array', {
+                accountNumber,
+                transactionsType: typeof transactions,
+                transactionsValue: transactions,
+              });
+              transactions = [];
+            }
+            
+            logger.info('Raw transactions before filtering', {
+              accountNumber,
+              totalRawTransactions: transactions.length,
+              startDate,
+              sampleTransaction: transactions[0] ? Object.keys(transactions[0]) : [],
+            });
+            
+            // Filter transactions by date if startDate is provided
+            if (startDate && transactions.length > 0) {
+              const startDateObj = new Date(startDate);
+              const beforeFilter = transactions.length;
+              transactions = transactions.filter((tx: any) => {
+                const txDate = new Date(tx['transaction-date'] || tx.transactionDate || tx.date || tx.createdAt || tx['executed-at']);
+                if (isNaN(txDate.getTime())) {
+                  logger.warn('Invalid transaction date', {
+                    accountNumber,
+                    transactionId: tx.id || tx['transaction-id'],
+                    dateFields: {
+                      'transaction-date': tx['transaction-date'],
+                      transactionDate: tx.transactionDate,
+                      date: tx.date,
+                      createdAt: tx.createdAt,
+                      'executed-at': tx['executed-at'],
+                    },
+                  });
+                  return false;
+                }
+                return txDate >= startDateObj;
+              });
+              logger.info('Filtered transactions by date', {
+                accountNumber,
+                beforeFilter,
+                afterFilter: transactions.length,
+                startDate,
+              });
+            }
+            
+            // Filter for trade-related transactions only
+            const beforeTradeFilter = transactions.length;
+            transactions = transactions.filter((tx: any) => {
+              const type = tx['transaction-type'] || tx.transactionType || tx.type || '';
+              const subType = tx['transaction-sub-type'] || tx.transactionSubType || tx.subType || '';
+              
+              // Include trade-related transactions
+              const isTrade = type === 'Trade' || 
+                             type === 'Fill' || 
+                             subType === 'Fill' ||
+                             subType === 'Trade' ||
+                             type.toLowerCase().includes('trade') ||
+                             subType.toLowerCase().includes('trade') ||
+                             subType.toLowerCase().includes('fill');
+              
+              if (!isTrade && transactions.length < 10) {
+                logger.debug('Transaction filtered out (not trade)', {
+                  accountNumber,
+                  type,
+                  subType,
+                  description: tx.description,
+                });
+              }
+              
+              return isTrade;
+            });
+            
+            logger.info('Fetched and filtered transactions successfully', {
+              accountNumber,
+              totalRawTransactions: beforeTradeFilter,
+              totalTradeTransactions: transactions.length,
+              startDate,
+            });
+          } catch (methodError) {
+            const errorMsg = methodError instanceof Error ? methodError.message : 'Unknown error';
+            logger.error('Error calling getAccountTransactions', {
+              accountNumber,
+              error: errorMsg,
+              stack: methodError instanceof Error ? methodError.stack : undefined,
+            });
+            errorDetails = {
+              error: 'getAccountTransactions failed',
+              message: errorMsg,
+              availableMethods,
+            };
+          }
+        } else {
+          logger.warn('transactionsService.getAccountTransactions is not a function', {
+            accountNumber,
+            availableMethods,
+            transactionsServiceType: typeof transactionsService,
+          });
+          errorDetails = {
+            error: 'getAccountTransactions method not found',
+            availableMethods,
+          };
+        }
       }
     } catch (apiError) {
+      const errorMsg = apiError instanceof Error ? apiError.message : 'Unknown error';
       logger.error('Failed to fetch historical transactions', { 
         accountNumber, 
         startDate,
-        error: apiError instanceof Error ? apiError.message : 'Unknown error'
+        error: errorMsg,
+        stack: apiError instanceof Error ? apiError.stack : undefined,
       });
-      throw apiError;
+      errorDetails = {
+        error: 'API call failed',
+        message: errorMsg,
+      };
     }
     
     // Transform transactions to trade history format
@@ -148,6 +252,7 @@ export async function GET(request: Request) {
       count: tradeHistory.length,
       startDate,
       accountNumber,
+      ...(errorDetails && { errorDetails, debug: true }),
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';

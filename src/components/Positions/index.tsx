@@ -716,13 +716,30 @@ export function Positions() {
       }
       
       const data = await response.json();
-      console.log('Positions API response:', data);
+      console.log('Positions API response:', {
+        positionsCount: data.positions?.length || 0,
+        count: data.count,
+        accountNumber: data.accountNumber,
+        hasError: !!data.error,
+        samplePosition: data.positions?.[0] ? {
+          id: data.positions[0].id,
+          pnl: data.positions[0].pnl,
+          state: data.positions[0].state,
+          qty: data.positions[0].qty,
+          avgPrice: data.positions[0].avgPrice,
+        } : null,
+      });
       
       if (data.error) {
+        console.error('Positions API error:', data);
         throw new Error(data.details || data.error || 'Failed to fetch positions');
       }
       
       const fetchedPositions = data.positions || [];
+      console.log('Positions fetched and syncing to store:', {
+        count: fetchedPositions.length,
+        positionsWithPnl: fetchedPositions.filter((p: Position) => p.pnl !== undefined && p.pnl !== 0).length,
+      });
       setPositions(fetchedPositions);
       
       // Sync positions to useOrders store

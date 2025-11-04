@@ -48,9 +48,28 @@ export function Dashboard() {
         setLoadingTodayTrades(true);
         const today = new Date().toISOString().split('T')[0];
         const response = await fetch(`/api/tastytrade/orders/history?startDate=${today}`);
+        
         if (response.ok) {
           const data = await response.json();
+          console.log('Dashboard today trades API response:', {
+            tradesCount: data.trades?.length || 0,
+            count: data.count,
+            errorDetails: data.errorDetails,
+            debug: data.debug,
+          });
+          
+          if (data.errorDetails) {
+            console.error('Dashboard API error details:', data.errorDetails);
+          }
+          
           setTodayTrades(data.trades || []);
+        } else {
+          const errorData = await response.json().catch(() => ({ error: response.statusText }));
+          console.error('Dashboard today trades API error:', {
+            status: response.status,
+            statusText: response.statusText,
+            error: errorData,
+          });
         }
       } catch (error) {
         console.error('Failed to fetch today\'s trades:', error);
@@ -70,15 +89,33 @@ export function Dashboard() {
   const openPositions = positions.filter(p => p.state !== 'CLOSED' && p.state !== 'FILLED');
   const closedPositions = positions.filter(p => p.state === 'CLOSED' || p.state === 'FILLED');
   
+  // Debug logging
+  console.log('Dashboard KPI calculations:', {
+    totalPositions: positions.length,
+    openPositions: openPositions.length,
+    closedPositions: closedPositions.length,
+    todayTrades: todayTrades.length,
+    positionsWithPnl: positions.filter(p => p.pnl !== undefined && p.pnl !== 0).length,
+    openPositionsWithPnl: openPositions.filter(p => p.pnl !== undefined && p.pnl !== 0).length,
+    sampleOpenPosition: openPositions[0] ? {
+      id: openPositions[0].id,
+      pnl: openPositions[0].pnl,
+      state: openPositions[0].state,
+    } : null,
+  });
+  
   // Calculate today's net P/L from today's trades
   const todayNetPL = todayTrades.reduce((sum, trade) => sum + (trade.profitLoss || 0), 0);
   
   // Calculate overall net P/L from closed positions (for historical context)
   const overallNetPL = closedPositions.reduce((sum, p) => sum + (p.pnl || 0), 0);
   
-  // Use today's net P/L for the dashboard display
-  const netPL = todayNetPL;
+  // Use today's net P/L OR open P/L if no trades today
+  // If we have open positions with P/L, use that as fallback
   const openPL = openPositions.reduce((sum, p) => sum + (p.pnl || 0), 0);
+  
+  // Prioritize: today's trades P/L > open positions P/L > closed positions P/L
+  const netPL = todayNetPL !== 0 ? todayNetPL : (openPL !== 0 ? openPL : overallNetPL);
   
   // Calculate entry cost as avgPrice * qty * 100 (for options)
   const openEntryCost = openPositions.reduce((sum, p) => sum + (p.avgPrice * p.qty * 100), 0);
@@ -92,6 +129,16 @@ export function Dashboard() {
   const todayWins = todayTrades.filter(t => (t.profitLoss || 0) > 0).length;
   const todayLosses = todayTrades.filter(t => (t.profitLoss || 0) <= 0).length;
   const winRate = todayWins + todayLosses > 0 ? (todayWins / (todayWins + todayLosses)) * 100 : 0;
+  
+  console.log('Dashboard calculated values:', {
+    netPL,
+    openPL,
+    todayNetPL,
+    overallNetPL,
+    todayWins,
+    todayLosses,
+    winRate,
+  });
 
   // Mock timing metrics (would calculate from actual trade history)
   const avgTTFF = 1.8;
