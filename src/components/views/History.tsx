@@ -16,7 +16,7 @@ type DateRange = 'today' | 'week' | '2weeks' | 'month' | '3months' | 'all';
 type UnderlyingFilter = 'ALL' | 'SPX' | 'QQQ' | 'NDX' | 'AAPL' | 'TSLA' | 'SPY' | 'RUT';
 type StrategyFilter = 'ALL' | 'Vertical' | 'Butterfly';
 
-interface TradeHistory {
+export interface TradeHistory {
   id: string;
   date: string;
   time: string;
