@@ -6,6 +6,7 @@ import { X, Target, StopCircle } from 'lucide-react';
 import { updateTPOrder, updateSLOrder, cancelTPOrder, cancelSLOrder, calculateTPPrice, calculateSLPrice, submitNewTPOrder, submitNewSLOrder, buildExitLegs } from '@/lib/tastytrade/orders';
 import { orderRegistry } from '@/lib/orderRegistry';
 import type { OrderLeg } from '@/lib/tastytrade/types';
+import { useOrders } from '@/stores/useOrders';
 
 // Design tokens matching Figma
 const TOKENS = {
@@ -700,6 +701,7 @@ export function Positions() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { updatePosition, addPosition } = useOrders();
 
   const fetchPositions = useCallback(async () => {
     try {
@@ -720,7 +722,27 @@ export function Positions() {
         throw new Error(data.details || data.error || 'Failed to fetch positions');
       }
       
-      setPositions(data.positions || []);
+      const fetchedPositions = data.positions || [];
+      setPositions(fetchedPositions);
+      
+      // Sync positions to useOrders store
+      // Access store state directly to check for existing positions
+      // Zustand stores created with create() have getState() method
+      const currentStorePositions = (useOrders as any).getState?.()?.positions || [];
+      
+      // Update existing positions or add new ones
+      fetchedPositions.forEach((position: Position) => {
+        const exists = currentStorePositions.some((p: Position) => p.id === position.id);
+        if (exists) {
+          updatePosition(position.id, position);
+        } else {
+          addPosition(position);
+        }
+      });
+      
+      // Note: We don't remove positions from store that aren't in fetchedPositions
+      // because they might be app-created positions that haven't been synced to TastyTrade yet
+      // The store will handle merging both sources
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       setError(errorMessage);
@@ -728,7 +750,7 @@ export function Positions() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [updatePosition, addPosition]);
 
   useEffect(() => {
     fetchPositions();

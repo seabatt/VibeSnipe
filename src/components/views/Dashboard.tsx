@@ -22,6 +22,8 @@ export function Dashboard() {
   const [currentBlock, setCurrentBlock] = useState<ScheduledBlock | null>(null);
   const [nextBlock, setNextBlock] = useState<ScheduledBlock | null>(null);
   const [now, setNow] = useState(new Date());
+  const [todayTrades, setTodayTrades] = useState<any[]>([]);
+  const [loadingTodayTrades, setLoadingTodayTrades] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -39,23 +41,57 @@ export function Dashboard() {
     return () => clearInterval(interval);
   }, [getCurrentBlock, getNextBlock]);
 
+  // Fetch today's trades
+  useEffect(() => {
+    const fetchTodayTrades = async () => {
+      try {
+        setLoadingTodayTrades(true);
+        const today = new Date().toISOString().split('T')[0];
+        const response = await fetch(`/api/tastytrade/orders/history?startDate=${today}`);
+        if (response.ok) {
+          const data = await response.json();
+          setTodayTrades(data.trades || []);
+        }
+      } catch (error) {
+        console.error('Failed to fetch today\'s trades:', error);
+      } finally {
+        setLoadingTodayTrades(false);
+      }
+    };
+
+    fetchTodayTrades();
+    // Refresh today's trades every 30 seconds
+    const interval = setInterval(fetchTodayTrades, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
   // Calculate KPIs from positions
-  const openPositions = positions.filter(p => p.state !== 'CLOSED');
-  const closedPositions = positions.filter(p => p.state === 'CLOSED');
+  // Handle both 'CLOSED' and 'FILLED' states for closed positions
+  const openPositions = positions.filter(p => p.state !== 'CLOSED' && p.state !== 'FILLED');
+  const closedPositions = positions.filter(p => p.state === 'CLOSED' || p.state === 'FILLED');
   
-  const netPL = closedPositions.reduce((sum, p) => sum + (p.pnl || 0), 0);
+  // Calculate today's net P/L from today's trades
+  const todayNetPL = todayTrades.reduce((sum, trade) => sum + (trade.profitLoss || 0), 0);
+  
+  // Calculate overall net P/L from closed positions (for historical context)
+  const overallNetPL = closedPositions.reduce((sum, p) => sum + (p.pnl || 0), 0);
+  
+  // Use today's net P/L for the dashboard display
+  const netPL = todayNetPL;
   const openPL = openPositions.reduce((sum, p) => sum + (p.pnl || 0), 0);
   
   // Calculate entry cost as avgPrice * qty * 100 (for options)
   const openEntryCost = openPositions.reduce((sum, p) => sum + (p.avgPrice * p.qty * 100), 0);
   const openPLPercent = openEntryCost > 0 ? (openPL / openEntryCost) * 100 : 0;
   
-  const closedEntryCost = closedPositions.reduce((sum, p) => sum + (p.avgPrice * p.qty * 100), 0);
-  const netPLPercent = closedEntryCost > 0 ? (netPL / closedEntryCost) * 100 : 0;
+  // Calculate net P/L percentage from today's trades
+  const todayEntryCost = todayTrades.reduce((sum, trade) => sum + (trade.entryCredit || 0), 0);
+  const netPLPercent = todayEntryCost > 0 ? (netPL / todayEntryCost) * 100 : 0;
   
-  const wins = closedPositions.filter(p => (p.pnl || 0) > 0).length;
-  const losses = closedPositions.filter(p => (p.pnl || 0) <= 0).length;
-  const winRate = wins + losses > 0 ? (wins / (wins + losses)) * 100 : 0;
+  // Calculate win rate from today's trades
+  const todayWins = todayTrades.filter(t => (t.profitLoss || 0) > 0).length;
+  const todayLosses = todayTrades.filter(t => (t.profitLoss || 0) <= 0).length;
+  const winRate = todayWins + todayLosses > 0 ? (todayWins / (todayWins + todayLosses)) * 100 : 0;
 
   // Mock timing metrics (would calculate from actual trade history)
   const avgTTFF = 1.8;
@@ -406,9 +442,8 @@ function TradingBlocks({ blocks, currentBlock, nextBlock, now, getTimeRemaining,
   // Helper function to convert 24-hour to 12-hour format
   const formatTo12Hour = (time24: string): string => {
     const [hours, minutes] = time24.split(':').map(Number);
-    const period = hours >= 12 ? 'PM' : 'AM';
     const hour12 = hours % 12 || 12; // Convert 0 to 12, 13 to 1, etc.
-    return `${hour12}:${String(minutes).padStart(2, '0')} ${period}`;
+    return `${hour12}:${String(minutes).padStart(2, '0')}`;
   };
 
   // Helper function to get time until a block starts
