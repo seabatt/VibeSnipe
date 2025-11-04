@@ -175,37 +175,76 @@ export async function GET() {
     }
 
     // Transform Tasty Trade positions to our Position format
+    // Tastytrade API returns fields directly on pos using kebab-case
     const transformedPositions = positions.map((pos: any) => {
-      // Extract instrument details
-      const instrument = pos.instrument || {};
-      const symbol = instrument.symbol || '';
-      const optionType = instrument.optionType || '';
-      const strikePrice = instrument.strikePrice || 0;
-      const expirationDate = instrument.expirationDate || '';
+      // Extract fields directly from pos (kebab-case)
+      const symbol = pos.symbol || pos['symbol'] || '';
+      const instrumentType = pos['instrument-type'] || pos.instrumentType || '';
+      const underlyingSymbol = pos['underlying-symbol'] || pos.underlyingSymbol || symbol;
+      const quantity = pos.quantity || 0;
+      const quantityDirection = pos['quantity-direction'] || pos.quantityDirection || 'Long';
+      const isLong = quantityDirection === 'Long' || quantity > 0;
+      
+      // Parse prices from strings to numbers
+      const averageOpenPriceStr = pos['average-open-price'] || pos.averageOpenPrice || '0';
+      const averageOpenPrice = parseFloat(averageOpenPriceStr) || 0;
+      
+      // Use close-price or average-daily-market-close-price for current price
+      const closePriceStr = pos['close-price'] || pos['average-daily-market-close-price'] || pos.closePrice || pos.mark || '0';
+      const currentPrice = parseFloat(closePriceStr) || 0;
+      
+      // For options, extract additional fields
+      const optionType = pos['option-type'] || pos.optionType || '';
+      const strikePrice = parseFloat(pos['strike-price'] || pos.strikePrice || '0') || 0;
+      const expirationDate = pos['expiration-date'] || pos.expirationDate || '';
       
       // Calculate P/L
-      const averageOpenPrice = pos.averageOpenPrice || 0;
-      const currentMark = pos.mark || 0;
-      const quantity = pos.quantity || 0;
+      // For equity: P/L = (currentPrice - averageOpenPrice) * quantity
+      // For options: P/L = (currentPrice - averageOpenPrice) * quantity * multiplier * 100
+      const multiplier = pos.multiplier || (instrumentType === 'Equity' ? 1 : 100);
+      const pnl = isLong
+        ? (currentPrice - averageOpenPrice) * Math.abs(quantity) * multiplier
+        : (averageOpenPrice - currentPrice) * Math.abs(quantity) * multiplier;
       
-      // P/L calculation depends on whether it's a long or short position
-      // For simplicity, we'll use mark price vs average open price
-      const pnl = quantity > 0 
-        ? (currentMark - averageOpenPrice) * quantity * 100
-        : (averageOpenPrice - currentMark) * Math.abs(quantity) * 100;
-
-      return {
-        id: pos['instrument-id'] || pos.instrumentId || `${symbol}-${expirationDate}-${strikePrice}`,
-        underlying: symbol.split(' ')[0] as any, // Extract underlying from symbol
-        strategy: optionType ? 'Vertical' : 'SPOT', // Simplified - could be more sophisticated
-        legs: [{
-          action: quantity > 0 ? 'BUY' : 'SELL',
+      // Generate ID
+      const positionId = pos['instrument-id'] || pos.instrumentId || 
+        (instrumentType === 'Equity' 
+          ? `${symbol}` 
+          : `${underlyingSymbol}-${expirationDate}-${strikePrice}-${optionType}`);
+      
+      // Handle equity vs options
+      const isEquity = instrumentType === 'Equity';
+      const isOption = instrumentType === 'Option' || optionType !== '';
+      
+      // Build legs array
+      const legs = [];
+      if (isOption) {
+        // Option position
+        legs.push({
+          action: isLong ? 'BUY' : 'SELL',
           right: optionType === 'C' ? 'CALL' : 'PUT',
           strike: strikePrice,
-          expiry: expirationDate.split('T')[0], // Format to YYYY-MM-DD
+          expiry: expirationDate ? expirationDate.split('T')[0] : '', // Format to YYYY-MM-DD
           quantity: Math.abs(quantity),
-          price: currentMark,
-        }],
+          price: currentPrice,
+        });
+      } else {
+        // Equity position - use CALL as default for type compatibility
+        legs.push({
+          action: isLong ? 'BUY' : 'SELL',
+          right: 'CALL', // Use CALL as placeholder for equity (SPOT not in LegRight type)
+          strike: 0,
+          expiry: '',
+          quantity: Math.abs(quantity),
+          price: currentPrice,
+        });
+      }
+
+      return {
+        id: positionId,
+        underlying: underlyingSymbol || symbol,
+        strategy: isOption ? 'Vertical' : 'SPOT', // Will be updated when we group spreads
+        legs: legs,
         qty: Math.abs(quantity),
         avgPrice: averageOpenPrice,
         pnl: pnl,
@@ -214,14 +253,227 @@ export async function GET() {
           stopLossPct: 100, // Default
         },
         state: 'FILLED' as const,
-        openedAt: pos.openedAt || new Date().toISOString(),
+        openedAt: pos['created-at'] || pos.createdAt || pos.openedAt || new Date().toISOString(),
+        // Store raw position data for spread grouping
+        _raw: {
+          symbol,
+          instrumentType,
+          underlyingSymbol,
+          optionType,
+          strikePrice,
+          expirationDate,
+          quantity,
+          quantityDirection,
+        },
       };
     });
 
+    // Group options into spreads
+    // Separate equity and options
+    const equityPositions = transformedPositions.filter(p => p._raw?.instrumentType === 'Equity');
+    const optionPositions = transformedPositions.filter(p => p._raw?.instrumentType === 'Option' || p._raw?.optionType);
+    
+    // Group options by underlying + expiration
+    const optionGroups = new Map<string, typeof optionPositions>();
+    optionPositions.forEach(pos => {
+      const raw = pos._raw;
+      if (!raw) return;
+      
+      const key = `${raw.underlyingSymbol}-${raw.expirationDate}`;
+      if (!optionGroups.has(key)) {
+        optionGroups.set(key, []);
+      }
+      optionGroups.get(key)!.push(pos);
+    });
+    
+    // Identify and group spreads
+    const spreadPositions: any[] = [];
+    
+    optionGroups.forEach((options, key) => {
+      if (options.length === 0) return;
+      
+      // Sort by strike price
+      const sortedOptions = [...options].sort((a, b) => {
+        const strikeA = a._raw?.strikePrice || 0;
+        const strikeB = b._raw?.strikePrice || 0;
+        return strikeA - strikeB;
+      });
+      
+      // Group by option type (calls vs puts)
+      const calls = sortedOptions.filter(o => o._raw?.optionType === 'C');
+      const puts = sortedOptions.filter(o => o._raw?.optionType === 'P');
+      
+      // Process call spreads
+      if (calls.length >= 2) {
+        spreadPositions.push(...groupIntoSpreads(calls, 'Call'));
+      }
+      
+      // Process put spreads
+      if (puts.length >= 2) {
+        spreadPositions.push(...groupIntoSpreads(puts, 'Put'));
+      }
+      
+      // If no spreads found, add individual options
+      if (calls.length === 1 && puts.length === 0) {
+        spreadPositions.push(calls[0]);
+      }
+      if (puts.length === 1 && calls.length === 0) {
+        spreadPositions.push(puts[0]);
+      }
+    });
+    
+    // Combine equity positions with spread positions
+    const finalPositions = [...equityPositions, ...spreadPositions];
+    
+    // Helper function to group options into spreads
+    function groupIntoSpreads(options: any[], optionTypeName: string): any[] {
+      const spreads: any[] = [];
+      const used = new Set<number>();
+      
+      for (let i = 0; i < options.length; i++) {
+        if (used.has(i)) continue;
+        
+        const option1 = options[i];
+        const strike1 = option1._raw?.strikePrice || 0;
+        
+        // Try to find a matching option for a vertical spread
+        for (let j = i + 1; j < options.length; j++) {
+          if (used.has(j)) continue;
+          
+          const option2 = options[j];
+          const strike2 = option2._raw?.strikePrice || 0;
+          
+          // Check if this could be a vertical spread (adjacent or nearby strikes)
+          const strikeDiff = Math.abs(strike2 - strike1);
+          
+          // Vertical spread: 2 options with same expiration, different strikes
+          // Check if they're opposite directions (one long, one short)
+          const qty1 = option1._raw?.quantity || 0;
+          const qty2 = option2._raw?.quantity || 0;
+          const dir1 = option1._raw?.quantityDirection || 'Long';
+          const dir2 = option2._raw?.quantityDirection || 'Long';
+          
+          // Check if they form a spread (opposite directions or different quantities)
+          const isVerticalSpread = strikeDiff > 0 && 
+            (dir1 !== dir2 || (Math.abs(qty1) !== Math.abs(qty2)));
+          
+          if (isVerticalSpread) {
+            // Create vertical spread
+            const spreadQty = Math.min(Math.abs(qty1), Math.abs(qty2));
+            const combinedPnl = option1.pnl + option2.pnl;
+            const combinedAvgPrice = ((option1.avgPrice * Math.abs(qty1)) + (option2.avgPrice * Math.abs(qty2))) / (Math.abs(qty1) + Math.abs(qty2));
+            
+            const spread: any = {
+              id: `${option1._raw?.underlyingSymbol}-${option1._raw?.expirationDate}-${Math.min(strike1, strike2)}/${Math.max(strike1, strike2)}-${optionTypeName}Vertical`,
+              underlying: option1.underlying,
+              strategy: `${optionTypeName} Vertical`,
+              legs: [
+                ...option1.legs,
+                ...option2.legs,
+              ],
+              qty: spreadQty,
+              avgPrice: combinedAvgPrice,
+              pnl: combinedPnl,
+              ruleBundle: option1.ruleBundle,
+              state: 'FILLED' as const,
+              openedAt: option1.openedAt,
+              _raw: {
+                ...option1._raw,
+                spreadType: 'Vertical',
+                strikes: [Math.min(strike1, strike2), Math.max(strike1, strike2)],
+              },
+            };
+            
+            spreads.push(spread);
+            used.add(i);
+            used.add(j);
+            break;
+          }
+        }
+        
+        // If not part of a spread, add as individual option
+        if (!used.has(i)) {
+          spreads.push(option1);
+        }
+      }
+      
+      // Check for butterfly spreads (3 options with specific pattern)
+      // Need to check original indices, not unused options
+      for (let i = 0; i < options.length - 2; i++) {
+        if (used.has(i)) continue;
+        for (let j = i + 1; j < options.length - 1; j++) {
+          if (used.has(j)) continue;
+          for (let k = j + 1; k < options.length; k++) {
+            if (used.has(k)) continue;
+            
+            const opt1 = options[i];
+            const opt2 = options[j];
+            const opt3 = options[k];
+            
+            const strikes = [
+              opt1._raw?.strikePrice || 0,
+              opt2._raw?.strikePrice || 0,
+              opt3._raw?.strikePrice || 0,
+            ].sort((a, b) => a - b);
+            
+            // Check if middle strike is average of outer strikes (butterfly pattern)
+            // Allow some tolerance for floating point comparison
+            const expectedMiddle = (strikes[0] + strikes[2]) / 2;
+            const isButterfly = Math.abs(strikes[1] - expectedMiddle) < 0.01;
+            
+            if (isButterfly) {
+              const combinedPnl = opt1.pnl + opt2.pnl + opt3.pnl;
+              const combinedQty = Math.min(Math.abs(opt1.qty), Math.abs(opt2.qty), Math.abs(opt3.qty));
+              const totalQty = Math.abs(opt1.qty) + Math.abs(opt2.qty) + Math.abs(opt3.qty);
+              const combinedAvgPrice = totalQty > 0 
+                ? ((opt1.avgPrice * Math.abs(opt1.qty)) + 
+                   (opt2.avgPrice * Math.abs(opt2.qty)) + 
+                   (opt3.avgPrice * Math.abs(opt3.qty))) / totalQty
+                : 0;
+              
+              const butterfly: any = {
+                id: `${opt1._raw?.underlyingSymbol}-${opt1._raw?.expirationDate}-${strikes[0]}/${strikes[1]}/${strikes[2]}-${optionTypeName}Butterfly`,
+                underlying: opt1.underlying,
+                strategy: `${optionTypeName} Butterfly`,
+                legs: [
+                  ...opt1.legs,
+                  ...opt2.legs,
+                  ...opt3.legs,
+                ],
+                qty: combinedQty,
+                avgPrice: combinedAvgPrice,
+                pnl: combinedPnl,
+                ruleBundle: opt1.ruleBundle,
+                state: 'FILLED' as const,
+                openedAt: opt1.openedAt,
+                _raw: {
+                  ...opt1._raw,
+                  spreadType: 'Butterfly',
+                  strikes: strikes,
+                },
+              };
+              
+              spreads.push(butterfly);
+              used.add(i);
+              used.add(j);
+              used.add(k);
+              break; // Found butterfly, break out of inner loops
+            }
+          }
+        }
+      }
+      
+      return spreads;
+    }
+
     return NextResponse.json({
-      positions: transformedPositions,
+      positions: finalPositions.map(p => {
+        // Remove _raw from response
+        const { _raw, ...position } = p;
+        return position;
+      }),
       accountNumber,
-      count: transformedPositions.length,
+      count: finalPositions.length,
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';

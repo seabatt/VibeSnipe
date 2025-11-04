@@ -22,6 +22,7 @@ export interface RuleBundle {
 }
 
 export type StrategyKind =
+  | 'SPOT'
   | 'Vertical'
   | 'Butterfly'
   | '8Ball Vertical'

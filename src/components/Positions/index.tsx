@@ -2,167 +2,204 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { Position } from '@/types';
-import { RiskGraph } from '../RiskGraph';
 
-function PositionTile({ position }: { position: Position }) {
-  const pnlPercent = position.avgPrice > 0 ? (position.pnl / (position.avgPrice * position.qty * 100)) * 100 : 0;
+// Helper function to format strategy name for display
+function formatStrategyName(position: Position): string {
+  if (position.strategy === 'SPOT') {
+    return position.underlying;
+  }
+  
+  // For spreads, format as "SYMBOL STRIKE1/STRIKE2 Strategy"
+  const strikes = position.legs
+    .filter(leg => leg.strike > 0)
+    .map(leg => leg.strike)
+    .sort((a, b) => a - b);
+  
+  if (strikes.length === 0) {
+    return `${position.underlying} ${position.strategy}`;
+  }
+  
+  // For butterfly, show all strikes
+  if (position.strategy === 'Butterfly' && strikes.length === 3) {
+    return `${position.underlying} ${strikes[0]}/${strikes[1]}/${strikes[2]} ${position.legs[0]?.right === 'CALL' ? 'Call' : 'Put'} ${position.strategy}`;
+  }
+  
+  // For vertical, show two strikes
+  if (position.strategy === 'Vertical' && strikes.length >= 2) {
+    const uniqueStrikes = [...new Set(strikes)];
+    const callOrPut = position.legs[0]?.right === 'CALL' ? 'Call' : 'Put';
+    if (uniqueStrikes.length === 2) {
+      return `${position.underlying} ${uniqueStrikes[0]}/${uniqueStrikes[1]} ${callOrPut} ${position.strategy}`;
+    }
+    return `${position.underlying} ${uniqueStrikes[0]}/${uniqueStrikes[uniqueStrikes.length - 1]} ${callOrPut} ${position.strategy}`;
+  }
+  
+  return `${position.underlying} ${position.strategy}`;
+}
+
+// Helper function to determine state (Profit, Risk, Neutral)
+function getPositionState(position: Position): 'Profit' | 'Risk' | 'Neutral' {
+  if (position.pnl > 0) return 'Profit';
+  if (position.pnl < 0) return 'Risk';
+  return 'Neutral';
+}
+
+function PositionRow({ position }: { position: Position }) {
+  const pnlPercent = position.avgPrice > 0 && position.qty > 0 
+    ? (position.pnl / (position.avgPrice * position.qty * (position.strategy === 'SPOT' ? 1 : 100))) * 100 
+    : 0;
+  
+  const state = getPositionState(position);
+  const strategyName = formatStrategyName(position);
 
   const handleClose = () => {
     // TODO: Implement position closing via API
     console.log('Close position:', position.id);
   };
 
-  const handleChangeTarget = () => {
-    const newTp = prompt('New Take Profit %:', position.ruleBundle.takeProfitPct.toString());
-    if (newTp) {
-      // TODO: Implement target update via API
-      console.log('Update target:', position.id, newTp);
-    }
+  const handleTP = () => {
+    // TODO: Implement take profit action
+    console.log('Take Profit:', position.id);
   };
 
-  const handleChangeStop = () => {
-    const newSl = prompt('New Stop Loss %:', position.ruleBundle.stopLossPct.toString());
-    if (newSl) {
-      // TODO: Implement stop update via API
-      console.log('Update stop:', position.id, newSl);
-    }
+  const handleSL = () => {
+    // TODO: Implement stop loss action
+    console.log('Stop Loss:', position.id);
   };
+
+  const pnlColor = position.pnl >= 0 ? 'text-profit' : 'text-risk';
+  const stateColor = state === 'Profit' ? 'bg-profit/20 text-profit' : 
+                     state === 'Risk' ? 'bg-risk/20 text-risk' : 
+                     'bg-text-secondary-dark/20 text-text-secondary-dark';
+  
+  // Calculate TP/SL progress (simplified - would need actual price targets)
+  const tpProgress = position.pnl > 0 ? Math.min(100, (position.pnl / (position.avgPrice * position.qty * 0.5)) * 100) : 0;
+  const slProgress = position.pnl < 0 ? Math.min(100, Math.abs(position.pnl / (position.avgPrice * position.qty))) * 100 : 0;
 
   return (
-    <div className="px-16 py-12 bg-surface-dark dark:bg-surface-dark border border-border-dark dark:border-border-dark rounded-12 space-y-12">
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <div className="text-sm font-medium text-text-primary-dark dark:text-text-primary-dark">
-            {position.underlying} {position.strategy}
-          </div>
-          <div className="text-xs text-text-secondary-dark dark:text-text-secondary-dark mt-4">
-            {position.legs.map((leg, i) => (
-              <span key={i} className="mr-8">
-                {leg.action} {leg.strike}{leg.right[0]} x{leg.quantity}
-              </span>
-            ))}
-          </div>
+    <tr className="border-b border-border-dark dark:border-border-dark hover:bg-surface-dark/50 transition-colors">
+      {/* SYMBOL / STRATEGY */}
+      <td className="px-16 py-12">
+        <div className="text-sm font-medium text-text-primary-dark dark:text-text-primary-dark">
+          {strategyName}
         </div>
-        <div className={`px-8 py-4 rounded-12 text-xs font-medium ${
-          position.state === 'FILLED'
-            ? 'bg-profit/20 text-profit'
-            : position.state === 'WORKING'
-            ? 'bg-warning/20 text-warning'
-            : 'bg-text-secondary-dark/20 text-text-secondary-dark dark:text-text-secondary-dark'
-        }`}>
-          {position.state}
-        </div>
-      </div>
-
-      {/* P/L Ring */}
-      <div className="flex items-center gap-16">
-        <div className="relative w-16 h-16">
-          <svg className="w-16 h-16 transform -rotate-90">
-            <circle
-              cx="32"
-              cy="32"
-              r="28"
-              stroke="currentColor"
-              strokeWidth="4"
-              fill="none"
-              className="text-border-dark dark:text-border-dark"
-            />
-            <circle
-              cx="32"
-              cy="32"
-              r="28"
-              stroke="currentColor"
-              strokeWidth="4"
-              fill="none"
-              strokeDasharray={`${Math.abs(pnlPercent) * 1.76} 176`}
-              className={position.pnl >= 0 ? 'text-profit' : 'text-risk'}
-            />
-          </svg>
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="text-center">
-              <div className={`text-xs font-medium tabular-nums ${
-                position.pnl >= 0 ? 'text-profit' : 'text-risk'
-              }`}>
-                ${position.pnl.toFixed(2)}
-              </div>
-              <div className="text-[10px] text-text-secondary-dark dark:text-text-secondary-dark">
-                {pnlPercent.toFixed(1)}%
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex-1 space-y-4">
-          <div className="flex justify-between text-xs">
-            <span className="text-text-secondary-dark dark:text-text-secondary-dark">Avg Price</span>
-            <span className="tabular-nums text-text-primary-dark dark:text-text-primary-dark">
-              ${position.avgPrice.toFixed(2)}
-            </span>
-          </div>
-          <div className="flex justify-between text-xs">
-            <span className="text-text-secondary-dark dark:text-text-secondary-dark">Quantity</span>
-            <span className="tabular-nums text-text-primary-dark dark:text-text-primary-dark">
-              {position.qty}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* TP/SL Bars */}
-      <div className="space-y-4">
+      </td>
+      
+      {/* QTY */}
+      <td className="px-16 py-12 text-sm text-text-primary-dark dark:text-text-primary-dark tabular-nums">
+        {position.qty}
+      </td>
+      
+      {/* ENTRY */}
+      <td className="px-16 py-12 text-sm text-text-primary-dark dark:text-text-primary-dark tabular-nums">
+        ${position.avgPrice.toFixed(2)}
+      </td>
+      
+      {/* P/L */}
+      <td className="px-16 py-12">
         <div className="flex items-center gap-8">
-          <span className="text-xs text-text-secondary-dark dark:text-text-secondary-dark w-16">
-            TP
-          </span>
-          <div className="flex-1 h-2 bg-border-dark dark:bg-border-dark rounded-full overflow-hidden">
+          <div className={`text-sm font-medium tabular-nums ${pnlColor}`}>
+            {position.pnl >= 0 ? '+' : ''}${position.pnl.toFixed(2)}
+          </div>
+          <div className={`text-xs tabular-nums ${pnlColor}`}>
+            ({pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(1)}%)
+          </div>
+          {/* P/L Ring Icon */}
+          <div className="relative w-12 h-12">
+            <svg className="w-12 h-12 transform -rotate-90">
+              <circle
+                cx="16"
+                cy="16"
+                r="12"
+                stroke="currentColor"
+                strokeWidth="2"
+                fill="none"
+                className="text-border-dark dark:text-border-dark opacity-30"
+              />
+              <circle
+                cx="16"
+                cy="16"
+                r="12"
+                stroke="currentColor"
+                strokeWidth="2"
+                fill="none"
+                strokeDasharray={`${Math.abs(pnlPercent) * 0.75} 75`}
+                className={pnlColor}
+              />
+            </svg>
+          </div>
+        </div>
+      </td>
+      
+      {/* TP / SL */}
+      <td className="px-16 py-12">
+        <div className="space-y-4">
+          {/* TP Bar */}
+          <div className="h-2 bg-border-dark dark:bg-border-dark rounded-full overflow-hidden">
             <div
               className="h-full bg-profit transition-all duration-200"
-              style={{ width: `${position.ruleBundle.takeProfitPct}%` }}
+              style={{ width: `${Math.max(0, Math.min(100, tpProgress))}%` }}
             />
           </div>
-          <span className="text-xs tabular-nums text-text-secondary-dark dark:text-text-secondary-dark">
-            {position.ruleBundle.takeProfitPct}%
-          </span>
-        </div>
-        <div className="flex items-center gap-8">
-          <span className="text-xs text-text-secondary-dark dark:text-text-secondary-dark w-16">
-            SL
-          </span>
-          <div className="flex-1 h-2 bg-border-dark dark:bg-border-dark rounded-full overflow-hidden">
+          {/* SL Bar */}
+          <div className="h-2 bg-border-dark dark:bg-border-dark rounded-full overflow-hidden">
             <div
               className="h-full bg-risk transition-all duration-200"
-              style={{ width: `${position.ruleBundle.stopLossPct}%` }}
+              style={{ width: `${Math.max(0, Math.min(100, slProgress))}%` }}
             />
           </div>
-          <span className="text-xs tabular-nums text-text-secondary-dark dark:text-text-secondary-dark">
-            {position.ruleBundle.stopLossPct}%
-          </span>
         </div>
-      </div>
-
-      {/* Actions */}
-      <div className="flex gap-4 pt-8 border-t border-border-dark dark:border-border-dark">
-        <button
-          onClick={handleClose}
-          className="flex-1 px-8 py-4 bg-risk hover:bg-risk/80 text-white text-xs font-medium rounded-12 transition-colors duration-200"
-        >
-          Close
-        </button>
-        <button
-          onClick={handleChangeTarget}
-          className="flex-1 px-8 py-4 bg-bg-dark dark:bg-bg-dark border border-border-dark dark:border-border-dark text-text-primary-dark dark:text-text-primary-dark text-xs font-medium rounded-12 hover:bg-border-dark dark:hover:bg-border-dark transition-colors duration-200"
-        >
-          Change Target
-        </button>
-        <button
-          onClick={handleChangeStop}
-          className="flex-1 px-8 py-4 bg-bg-dark dark:bg-bg-dark border border-border-dark dark:border-border-dark text-text-primary-dark dark:text-text-primary-dark text-xs font-medium rounded-12 hover:bg-border-dark dark:hover:bg-border-dark transition-colors duration-200"
-        >
-          Change Stop
-        </button>
-      </div>
-    </div>
+      </td>
+      
+      {/* STATE */}
+      <td className="px-16 py-12">
+        <div className={`px-8 py-4 rounded-full text-xs font-medium text-center ${stateColor}`}>
+          {state}
+        </div>
+      </td>
+      
+      {/* CURVE */}
+      <td className="px-16 py-12">
+        <div className="w-32 h-16 flex items-center">
+          {/* Simple curve visualization */}
+          <svg className="w-full h-full" viewBox="0 0 32 16" preserveAspectRatio="none">
+            <path
+              d={position.pnl >= 0 
+                ? "M 0,12 Q 8,4 16,8 T 32,4"
+                : "M 0,4 Q 8,12 16,8 T 32,12"
+              }
+              stroke={position.pnl >= 0 ? '#10b981' : '#f59e0b'}
+              strokeWidth="1.5"
+              fill="none"
+            />
+          </svg>
+        </div>
+      </td>
+      
+      {/* ACTIONS */}
+      <td className="px-16 py-12">
+        <div className="flex items-center gap-4">
+          <button
+            onClick={handleClose}
+            className="px-8 py-4 text-xs font-medium text-text-secondary-dark dark:text-text-secondary-dark hover:text-text-primary-dark dark:hover:text-text-primary-dark transition-colors"
+          >
+            Close
+          </button>
+          <button
+            onClick={handleTP}
+            className="px-8 py-4 text-xs font-medium text-text-secondary-dark dark:text-text-secondary-dark hover:text-text-primary-dark dark:hover:text-text-primary-dark transition-colors"
+          >
+            TP
+          </button>
+          <button
+            onClick={handleSL}
+            className="px-8 py-4 text-xs font-medium text-text-secondary-dark dark:text-text-secondary-dark hover:text-text-primary-dark dark:hover:text-text-primary-dark transition-colors"
+          >
+            SL
+          </button>
+        </div>
+      </td>
+    </tr>
   );
 }
 
@@ -295,21 +332,62 @@ export function Positions() {
   return (
     <div className="space-y-12">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-medium text-text-primary-dark dark:text-text-primary-dark">
-          Positions ({positions.length})
+        <h2 className="text-lg font-semibold text-text-primary-dark dark:text-text-primary-dark">
+          Open Positions
         </h2>
-        <button
-          onClick={fetchPositions}
-          disabled={loading}
-          className="text-xs text-text-secondary-dark dark:text-text-secondary-dark hover:text-text-primary-dark dark:hover:text-text-primary-dark transition-colors disabled:opacity-50"
-        >
-          {loading ? 'Refreshing...' : 'Refresh'}
-        </button>
+        <div className="flex items-center gap-8">
+          <span className="text-sm text-text-secondary-dark dark:text-text-secondary-dark">
+            {positions.length} active
+          </span>
+          <button
+            onClick={fetchPositions}
+            disabled={loading}
+            className="text-xs text-text-secondary-dark dark:text-text-secondary-dark hover:text-text-primary-dark dark:hover:text-text-primary-dark transition-colors disabled:opacity-50"
+          >
+            {loading ? 'Refreshing...' : 'Refresh'}
+          </button>
+        </div>
       </div>
-      <div className="space-y-12 max-h-[600px] overflow-y-auto">
-        {positions.map((position) => (
-          <PositionTile key={position.id} position={position} />
-        ))}
+      
+      {/* Table */}
+      <div className="bg-surface-dark dark:bg-surface-dark border border-border-dark dark:border-border-dark rounded-12 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border-dark dark:border-border-dark bg-surface-dark/50">
+                <th className="px-16 py-12 text-left text-xs font-medium text-text-secondary-dark dark:text-text-secondary-dark uppercase tracking-wider">
+                  SYMBOL / STRATEGY
+                </th>
+                <th className="px-16 py-12 text-left text-xs font-medium text-text-secondary-dark dark:text-text-secondary-dark uppercase tracking-wider">
+                  QTY
+                </th>
+                <th className="px-16 py-12 text-left text-xs font-medium text-text-secondary-dark dark:text-text-secondary-dark uppercase tracking-wider">
+                  ENTRY
+                </th>
+                <th className="px-16 py-12 text-left text-xs font-medium text-text-secondary-dark dark:text-text-secondary-dark uppercase tracking-wider">
+                  P/L
+                </th>
+                <th className="px-16 py-12 text-left text-xs font-medium text-text-secondary-dark dark:text-text-secondary-dark uppercase tracking-wider">
+                  TP / SL
+                </th>
+                <th className="px-16 py-12 text-left text-xs font-medium text-text-secondary-dark dark:text-text-secondary-dark uppercase tracking-wider">
+                  STATE
+                </th>
+                <th className="px-16 py-12 text-left text-xs font-medium text-text-secondary-dark dark:text-text-secondary-dark uppercase tracking-wider">
+                  CURVE
+                </th>
+                <th className="px-16 py-12 text-left text-xs font-medium text-text-secondary-dark dark:text-text-secondary-dark uppercase tracking-wider">
+                  ACTIONS
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {positions.map((position) => (
+                <PositionRow key={position.id} position={position} />
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
