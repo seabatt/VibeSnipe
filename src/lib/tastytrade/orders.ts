@@ -1175,10 +1175,10 @@ export async function monitorOrderFill(
  * Maps OrderLeg action to SDK action format.
  * 
  * @param {OrderLeg['action']} action - OrderLeg action
- * @returns {string} SDK action format
+ * @returns {'Buy to Open' | 'Sell to Open' | 'Buy to Close' | 'Sell to Close'} SDK action format
  */
-function mapActionToSDK(action: OrderLeg['action']): string {
-  const actionMap: Record<OrderLeg['action'], string> = {
+function mapActionToSDK(action: OrderLeg['action']): 'Buy to Open' | 'Sell to Open' | 'Buy to Close' | 'Sell to Close' {
+  const actionMap: Record<OrderLeg['action'], 'Buy to Open' | 'Sell to Open' | 'Buy to Close' | 'Sell to Close'> = {
     'BUY_TO_OPEN': 'Buy to Open',
     'SELL_TO_OPEN': 'Sell to Open',
     'BUY_TO_CLOSE': 'Buy to Close',
