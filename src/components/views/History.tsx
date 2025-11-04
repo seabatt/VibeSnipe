@@ -188,8 +188,12 @@ export function History() {
 
   // Merge trades from both sources
   const allTrades = useMemo(() => {
+    // Map both rawTrades and tastyTrades to TradeHistory format
+    const mappedRawTrades = rawTrades.map(mapTradeRecord);
+    const mappedTastyTrades = tastyTrades.map(mapTradeRecord);
+    
     // Combine app trades and TastyTrade trades
-    const combined = [...rawTrades, ...tastyTrades];
+    const combined = [...mappedRawTrades, ...mappedTastyTrades];
     
     // Remove duplicates by trade ID (prefer app version if duplicate)
     const tradeMap = new Map<string, TradeHistory>();
