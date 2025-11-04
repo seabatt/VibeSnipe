@@ -167,11 +167,15 @@ export function buildTradeIntent(options: BuildTradeIntentOptions): TradeIntent 
   if (!ruleBundle) {
     throw new Error('Rule bundle is required');
   }
-  if (ruleBundle.takeProfitPct !== null && (!Number.isFinite(ruleBundle.takeProfitPct) || ruleBundle.takeProfitPct < 0)) {
-    throw new Error('Rule bundle takeProfitPct must be non-negative');
+  if (ruleBundle.takeProfitPct !== null) {
+    if (!Number.isFinite(ruleBundle.takeProfitPct) || ruleBundle.takeProfitPct < 0) {
+      throw new Error('Rule bundle takeProfitPct must be non-negative');
+    }
   }
-  if (ruleBundle.stopLossPct !== null && (!Number.isFinite(ruleBundle.stopLossPct) || ruleBundle.stopLossPct < 0)) {
-    throw new Error('Rule bundle stopLossPct must be non-negative');
+  if (ruleBundle.stopLossPct !== null) {
+    if (!Number.isFinite(ruleBundle.stopLossPct) || ruleBundle.stopLossPct < 0) {
+      throw new Error('Rule bundle stopLossPct must be non-negative');
+    }
   }
 
   // Validate account ID
